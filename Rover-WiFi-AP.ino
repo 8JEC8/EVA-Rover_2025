@@ -1,4 +1,10 @@
 #include <WiFi.h>
+#include <SPI.h>
+#include <LoRa.h>
+
+#define LORA_FREQ 433E6
+#define LORA_SS   5    // CS
+#define LORA_DIO0 25   // DIO0
 
 // Setup de WiFi (AP)
 const char* ssid     = "Voyager21";     // Nombre de Red WiFi
@@ -19,13 +25,31 @@ void setup() {
   // Iniciar Servidor TCP
   server.begin(3131);
   Serial.println("TCP Server Iniciado en Puerto 3131");
+  SPI.begin();
+
+  LoRa.setPins(LORA_SS, -1, LORA_DIO0);
+
+  if (!LoRa.begin(LORA_FREQ)) {
+    Serial.println("LoRa init failed!");
+    while (true);
+  }
+
+  // --- Robustness settings ---
+  LoRa.setTxPower(20);             // max TX power (17–20 typical for SX1276)
+  LoRa.setSpreadingFactor(12);     // 6–12, higher = more robust, slower
+  LoRa.setSignalBandwidth(125E3);  // 62.5E3 or 125E3 good for robustness
+  LoRa.setCodingRate4(8);          // 5–8, higher = more robust
+  // ----------------------------
+
+  Serial.println("LoRa Inicializado");
 }
 
 WiFiClient client;  // Declare once, outside loop()
 
 void loop() {
+  // --------- WiFi STA Connection Handling ---------
   if (!client || !client.connected()) {
-    client = server.available();  // Aceptar Nueva Conexión si no se ha Conectado
+    client = server.available();  // Accept new connection if none
     if (client) {
       Serial.println("STA Conectado");
       Serial.println("'.COMLIST' para Lista de Comandos Disponibles");
@@ -33,21 +57,33 @@ void loop() {
   }
 
   if (client && client.connected()) {
-    // Revisar si Cliente Envió Mensaje
+    // --- 1a. Check messages from STA (WiFi) ---
     if (client.available()) {
       String msg = client.readStringUntil('\n');
       msg.trim();
       if (msg.length() > 0) {
-        Serial.print("  RECV_STA_");
+        Serial.print("RECV_STA_");
         Serial.println(msg);
       }
     }
+  }
 
-    // Revisar si hay Mensaje en Terminal
-    if (Serial.available()) {
-      String userMsg = Serial.readStringUntil('\n');
-      userMsg.trim();   // remove whitespace and line endings
+  // --------- Serial Input Handling ---------
+  if (Serial.available()) {
+    String userMsg = Serial.readStringUntil('\n');
+    userMsg.trim();
 
+    if (userMsg.length() > 0) {
+      // --- LoRa Message ---
+      if (userMsg.startsWith("lora.")) {
+        LoRa.beginPacket();
+        LoRa.print(userMsg);  // Keep "lora." prefix
+        LoRa.endPacket();
+        Serial.print("LORA_AP_SENT_");
+        Serial.println(userMsg);
+      } 
+      // --- WiFi Message ---
+      else if (client && client.connected()) {
         if (userMsg.equalsIgnoreCase(".COMLIST")) {
           Serial.println(userMsg);
           Serial.println("  Lista de Comandos:");
@@ -63,11 +99,27 @@ void loop() {
           Serial.println("    '.A'      : Movimiento Hacia Izquierda");
           Serial.println("    '.D'      : Movimiento Hacia Derecha");
         } else {
-            client.println(userMsg);       // Enviado a STA
-            Serial.print("SENT_AP_");      // Formato de Mensajes Normales
-            Serial.println(userMsg);
+          client.println(userMsg);  // Send to STA
+          Serial.print("SENT_AP_");  // Log
+          Serial.println(userMsg);
         }
       }
+    }
   }
+
+  // --------- LoRa Handling ---------
+  int packetSize = LoRa.parsePacket();
+  if (packetSize) {
+    String received = "";
+    while (LoRa.available()) {
+      received += (char)LoRa.read();
+    }
+    Serial.print("LORA_STA_RECV_");
+    Serial.print(received);
+    Serial.print("_");
+    Serial.print(LoRa.packetRssi());
+    Serial.println("_dBm");
+  }
+
   delay(50);
 }
