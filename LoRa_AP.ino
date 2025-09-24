@@ -16,6 +16,10 @@ bool apEnabled = false; // Bandera: Estado de AP
 
 void startAP() {
   if (!apEnabled) {
+    WiFi.disconnect(true); // ensures any previous STA or AP session is cleared
+    WiFi.mode(WIFI_OFF);
+    delay(100);            // allow WiFi driver to settle
+
     WiFi.mode(WIFI_AP);
     bool result = WiFi.softAP(apSSID, apPASS);
     if (result) {
@@ -36,9 +40,19 @@ void startAP() {
 
 void stopAP() {
   if (apEnabled) {
-    WiFi.softAPdisconnect(true);
+    // Disconnect all connected clients first, keep AP running briefly
+    uint8_t numClients = WiFi.softAPgetStationNum();
+    if (numClients > 0) {
+      Serial.println("LORA_AP_.APOFF");
+      Serial.printf(" AP_DCING_%d_CLIENTS\n", numClients);
+      WiFi.softAPdisconnect(false); // disconnect clients but keep AP alive
+      delay(100); // give the driver time to process disconnections
+    }
+
+    // Now fully turn off the AP
+    WiFi.softAPdisconnect(true); // fully stop AP
     WiFi.mode(WIFI_OFF);
-    Serial.println("LORA_AP_.APOFF");
+    delay(100); // allow WiFi driver to settle
     Serial.println(" AP_WiFi_DISABLED");
     apEnabled = false;
   } else {
