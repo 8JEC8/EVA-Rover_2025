@@ -12,13 +12,13 @@
 const char *apSSID = "Voyager21_AP";
 const char *apPASS = "12345678";
 
-bool apEnabled = false; // Bandera: Estado de AP
+bool apEnabled = false; // Bandera: AP state
 
 void startAP() {
   if (!apEnabled) {
-    WiFi.disconnect(true); // ensures any previous STA or AP session is cleared
+    WiFi.disconnect(true); // Clear session
     WiFi.mode(WIFI_OFF);
-    delay(100);            // allow WiFi driver to settle
+    delay(100);            // Delay WiFi driver
 
     WiFi.mode(WIFI_AP);
     bool result = WiFi.softAP(apSSID, apPASS);
@@ -40,19 +40,17 @@ void startAP() {
 
 void stopAP() {
   if (apEnabled) {
-    // Disconnect all connected clients first, keep AP running briefly
     uint8_t numClients = WiFi.softAPgetStationNum();
     if (numClients > 0) {
       Serial.println("LORA_AP_.APOFF");
       Serial.printf(" AP_DCING_%d_CLIENTS\n", numClients);
-      WiFi.softAPdisconnect(false); // disconnect clients but keep AP alive
-      delay(100); // give the driver time to process disconnections
+      WiFi.softAPdisconnect(false); // DC clients
+      delay(100); // Process DC
     }
 
-    // Now fully turn off the AP
-    WiFi.softAPdisconnect(true); // fully stop AP
+    WiFi.softAPdisconnect(true); // Stop AP
     WiFi.mode(WIFI_OFF);
-    delay(100); // allow WiFi driver to settle
+    delay(100); // Delay: WiFi Driver
     Serial.println(" AP_WiFi_DISABLED");
     apEnabled = false;
   } else {
@@ -73,11 +71,14 @@ void setup() {
     while (true);
   }
 
-  // --- Robustness settings ---
-  LoRa.setTxPower(20);
-  LoRa.setSpreadingFactor(12);
-  LoRa.setSignalBandwidth(125E3);
-  LoRa.setCodingRate4(8);
+  // LoRa settings:
+LoRa.setTxPower(20);
+LoRa.setSpreadingFactor(10); // Spreading Factor
+LoRa.setSignalBandwidth(125E3); // BW
+LoRa.setCodingRate4(5); // Coding Rate
+LoRa.setSyncWord(0x88); // Sync word
+LoRa.setPreambleLength(8); // Preamble: 8 symbols
+LoRa.enableCrc(); // CRC
   // ----------------------------
 
   Serial.println("LORA_READY");
