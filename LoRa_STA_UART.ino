@@ -7,6 +7,12 @@ const char* password = "12345678";
 bool staEnabled = false; 
 wl_status_t lastStatus = WL_NO_SHIELD;  // Track last known status
 
+// Use UART2 for communication with LoRa ESP
+HardwareSerial LoRaSerial(2); // UART2
+
+#define UART_RX 19
+#define UART_TX 20
+
 void startSTA() {
   if (!staEnabled) {
     // --- Full reset of WiFi stack ---
@@ -16,7 +22,7 @@ void startSTA() {
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
-    Serial.print("STA_CONN_ATTEMPT");
+    LoRaSerial.print("STA_CONN_ATTEMPT");
 
     unsigned long startAttempt = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 5000) {
@@ -24,20 +30,20 @@ void startSTA() {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\nSTA_ENABLED");
-      Serial.print("CONNECTED_");
-      Serial.println(WiFi.localIP());
+      LoRaSerial.println("\nSTA_ENABLED");
+      LoRaSerial.print("CONNECTED_");
+      LoRaSerial.println(WiFi.localIP());
       staEnabled = true;
       lastStatus = WL_CONNECTED;
     } else {
-      Serial.println("\nSTA_ERR_CONNECTION");
+      LoRaSerial.println("\nSTA_ERR_CONNECTION");
       WiFi.disconnect(true);
       WiFi.mode(WIFI_OFF);
       staEnabled = false;
       lastStatus = WL_NO_SHIELD;
     }
   } else {
-    Serial.println("STA_WiFi_RUNNING");
+    LoRaSerial.println("STA_WiFi_RUNNING");
   }
 }
 
@@ -45,24 +51,24 @@ void stopSTA() {
   if (staEnabled) {
     WiFi.disconnect(true);  // disconnect and erase config
     WiFi.mode(WIFI_OFF);    // turn WiFi radio fully off
-    Serial.println("STA_DISABLED");
+    LoRaSerial.println("STA_DISABLED");
     staEnabled = false;
     lastStatus = WL_NO_SHIELD;
   } else {
-    Serial.println("STA_WiFi_NOTRUNNING");
+    LoRaSerial.println("STA_WiFi_NOTRUNNING");
   }
 }
 
 void setup() {
-  Serial.begin(115200);
-  while (!Serial);
-
+  // Initialize UART2
+  LoRaSerial.begin(115200, SERIAL_8N1, UART_RX, UART_TX);
+  delay(100); // allow serial to settle
 }
 
 void loop() {
   // --- Command handling ---
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
+  if (LoRaSerial.available()) {
+    String cmd = LoRaSerial.readStringUntil('\n');
     cmd.trim();
 
     if (cmd.equalsIgnoreCase(".STAON")) {
@@ -70,7 +76,7 @@ void loop() {
     } else if (cmd.equalsIgnoreCase(".STAOFF")) {
       stopSTA();
     } else if (cmd.length() > 0) {
-      Serial.println(cmd);
+      LoRaSerial.println(cmd);
     }
   }
 
@@ -79,12 +85,12 @@ void loop() {
 
   if (currentStatus != lastStatus) {
     if (lastStatus == WL_CONNECTED && currentStatus != WL_CONNECTED) {
-      Serial.println("STA_DISCONNECTED");
+      LoRaSerial.println("STA_DISCONNECTED");
       staEnabled = false;       // automatically update flag
     } else if (lastStatus != WL_CONNECTED && currentStatus == WL_CONNECTED) {
-      Serial.println("STA_RECONNECTED");
-      Serial.print("CONNECTED_");
-      Serial.println(WiFi.localIP());
+      LoRaSerial.println("STA_RECONNECTED");
+      LoRaSerial.print("CONNECTED_");
+      LoRaSerial.println(WiFi.localIP());
       staEnabled = true;        // automatically update flag
     }
     lastStatus = currentStatus;
