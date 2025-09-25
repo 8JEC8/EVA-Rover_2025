@@ -6,17 +6,10 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_AHTX0.h>
 #include <VL53L0X.h>
-#include <Adafruit_NeoPixel.h>
-#define LED_COUNT 8
-#define LED_PIN1 1
-#define LED_PIN2 3
 
 VL53L0X sensor1;
 VL53L0X sensor2;
 VL53L0X sensor3;
-
-Adafruit_NeoPixel strip1(LED_COUNT, LED_PIN1, NEO_GRB + NEO_KHZ800);
-Adafruit_NeoPixel strip2(LED_COUNT, LED_PIN2, NEO_GRB + NEO_KHZ800);
 
 Adafruit_INA219 ina219_ESP(0x40);
 Adafruit_INA219 ina219_M1(0x41);
@@ -46,19 +39,14 @@ WiFiClient client;
 #define XSHUT2 17
 #define XSHUT3 4
 
+// #define RX_PIN    3   // UART RX
+// #define TX_PIN    1   // UART TX
+
 int stepsPerRev = 200;       // 1 revolución por defecto, cambiar con .STEP###
 #define STEP_DELAY_US 2000   // Velocidad
 
 void setup() {
   Serial.begin(115200);
-  
-  strip1.begin();           // Iniciar Strip
-  strip1.show();            // Apagar LEDs
-  strip1.setBrightness(10); // Brillo (0-255)
-  strip2.begin();
-  strip2.show();
-  strip2.setBrightness(10);
-
   delay(20);
   Serial.print("Conectando a AP: ");
   Serial.println(ssid);
@@ -187,127 +175,75 @@ void loop() {
       msg.trim();
 
       if (msg.equalsIgnoreCase(".RSSI")) {
-        long rssi = WiFi.RSSI();
-        String rssiMsg = "TEL_RSSI_" + String(rssi) + "_dBm";
+        String rssiMsg;
+        getRSSI(rssiMsg);
         client.println(rssiMsg);
-        rainbowCycle(10);
       }
 
       else if (msg.equalsIgnoreCase(".AMBTEMP")) {
+        String sht_Msg;
         float sht_temp = sht31.readTemperature();
-        float sht_hum  = sht31.readHumidity();
+        getAmbTemp(sht_Msg);
 
         if (!isnan(sht_temp)) {
-          String sht_tempMsg = "TEL_TEMP_" + String(sht_temp) + "_CELCIUS";
-          String sht_humMsg  = "TEL_HUMI_"  + String(sht_hum)  + "_PERCENT";
-          client.println(sht_tempMsg);
-          client.println(sht_humMsg);
+          client.println(sht_Msg);
         } else {
           client.println("ERR_SHT31");
         }
       }
 
       else if (msg.equalsIgnoreCase(".INTTEMP")) {
-        sensors_event_t aht_humidity, aht_temp;
-        aht.getEvent(&aht_humidity, &aht_temp);
-
-        String aht_tempMsg = "TEL_TEMP_" + String(aht_temp.temperature) + "_CELCIUS";
-        String aht_humMsg  = "TEL_HUMI_" + String(aht_humidity.relative_humidity) + "_PERCENT";
-
-        client.println(aht_tempMsg);
-        client.println(aht_humMsg);
+        String aht_Msg;
+        getIntTemp(aht_Msg);
+        client.println(aht_Msg);
       }
       
-      else if (msg.equalsIgnoreCase(".INTTEMP")) {
-        sensors_event_t aht_humidity, aht_temp;
-        aht.getEvent(&aht_humidity, &aht_temp);
-
-        String aht_tempMsg = "TEL_TEMP_" + String(aht_temp.temperature) + "_CELCIUS";
-        String aht_humMsg  = "TEL_HUMI_" + String(aht_humidity.relative_humidity) + "_PERCENT";
-
-        client.println(aht_tempMsg);
-        client.println(aht_humMsg);
-      }
-
-
       else if (msg.startsWith(".POWER")) {
-        int powerNum = msg.substring(6).toInt(); // 1,2,3 luego de .POWER
+        int powerNum = msg.substring(6).toInt(); // POWER1, POWER2, POWER3
+        String powerMsg;
 
         if (powerNum == 1) {
-          float busVoltage = ina219_ESP.getBusVoltage_V();
-          float current_mA = ina219_ESP.getCurrent_mA();
-          float power_mW   = ina219_ESP.getPower_mW();
-
-          String TEL_V = "TEL_VOLT1_" + String(busVoltage) + "_V";
-          String TEL_I = "TEL_CURR1_" + String(current_mA) + "_mA";
-          String TEL_P = "TEL_POWER1_" + String(power_mW) + "_mW";
-          client.println(TEL_V);
-          client.println(TEL_I);
-          client.println(TEL_P);
-        } 
+          getPower(ina219_ESP, powerNum, powerMsg);
+          client.print(powerMsg);
+        }
         else if (powerNum == 2) {
-          float busVoltage = ina219_M1.getBusVoltage_V();
-          float current_mA = ina219_M1.getCurrent_mA();
-          float power_mW   = ina219_M1.getPower_mW();
-
-          String TEL_V = "TEL_VOLT2_" + String(busVoltage) + "_V";
-          String TEL_I = "TEL_CURR2_" + String(current_mA) + "_mA";
-          String TEL_P = "TEL_POWER2_" + String(power_mW) + "_mW";
-          client.println(TEL_V);
-          client.println(TEL_I);
-          client.println(TEL_P);
-        } 
+          getPower(ina219_M1, powerNum, powerMsg);
+          client.print(powerMsg);
+        }
         else if (powerNum == 3) {
-          float busVoltage = ina219_M2.getBusVoltage_V();
-          float current_mA = ina219_M2.getCurrent_mA();
-          float power_mW   = ina219_M2.getPower_mW();
-
-          String TEL_V = "TEL_VOLT3_" + String(busVoltage) + "_V";
-          String TEL_I = "TEL_CURR3_" + String(current_mA) + "_mA";
-          String TEL_P = "TEL_POWER3_" + String(power_mW) + "_mW";
-          client.println(TEL_V);
-          client.println(TEL_I);
-          client.println(TEL_P);
-        } 
+          getPower(ina219_M2, powerNum, powerMsg);
+          client.print(powerMsg);
+        }
         else {
-          String TEL_ERROR_INA = "ERROR_USE_.POWER1_.POWER2_.POWER3";
-          client.println(TEL_ERROR_INA);
+          client.println("ERROR_USE_.POWER1_.POWER2_.POWER3");
         }
       }
 
       else if (msg.equalsIgnoreCase(".GYRO")) {
-        sensors_event_t a, g, temp;
-        mpu.getEvent(&a, &g, &temp);
-
-        String ACCX = "TEL_ACC_X_" + String(a.acceleration.x) + "_m/s^2";
-        String ACCY = "TEL_ACC_Y_" + String(a.acceleration.y) + "_m/s^2";
-        String ACCZ = "TEL_ACC_Z_" + String(a.acceleration.z) + "_m/s^2";
-        String GYRX = "TEL_GYR_X_" + String(g.gyro.x) + "_rad/s";
-        String GYRY = "TEL_GYR_Y_" + String(g.gyro.y) + "_rad/s";
-        String GYRZ = "TEL_GYR_Z_" + String(g.gyro.z) + "_rad/s";
-        client.println(ACCX);
-        client.println(ACCY);
-        client.println(ACCZ);
-        client.println(GYRX);
-        client.println(GYRY);
-        client.println(GYRZ);
+        String gyroMsg;
+        getGyro(gyroMsg);
+        client.print(gyroMsg);
       }
 
       else if (msg.startsWith(".DIST")) {
         int distNum = msg.substring(5).toInt();
-        String TEL_DIST;
+        String distMsg;
 
         if (distNum == 1) {
-          TEL_DIST = "TEL_LASER1_" + String(sensor1.readRangeContinuousMillimeters()) + "_mm";
-        } else if (distNum == 2) {
-          TEL_DIST = "TEL_LASER2_" + String(sensor2.readRangeContinuousMillimeters()) + "_mm";
-        } else if (distNum == 3) {
-          TEL_DIST = "TEL_LASER3_" + String(sensor3.readRangeContinuousMillimeters()) + "_mm";
-        } else {
-          TEL_DIST = "ERROR_";
+          getDist(sensor1, distNum, distMsg);
+          client.println(distMsg);
+        } 
+        else if (distNum == 2) {
+          getDist(sensor2, distNum, distMsg);
+          client.println(distMsg);
+        } 
+        else if (distNum == 3) {
+          getDist(sensor3, distNum, distMsg);
+          client.println(distMsg);
+        } 
+        else {
+          client.println("ERROR_USE_.DIST1_.DIST2_.DIST3");
         }
-
-        client.println(TEL_DIST);
       }
 
       else if (msg.startsWith(".SET")) {
@@ -351,6 +287,54 @@ void loop() {
   }
 
   delay(50);
+}
+
+void getRSSI(String &rssiMsg) {
+  long rssi = WiFi.RSSI();
+  rssiMsg = "TEL_RSSI_" + String(rssi) + "_dBm";
+}
+
+void getAmbTemp(String &sht_Msg) {
+  float sht_temp = sht31.readTemperature();
+  float sht_hum  = sht31.readHumidity();
+
+  sht_Msg = String("TEL_TEMP_") + String(sht_temp) + "_CELCIUS\n" +
+            String("TEL_HUMI_") + String(sht_hum) + "_PERCENT";
+}
+
+void getIntTemp(String &aht_Msg) {
+  sensors_event_t aht_humidity, aht_temp;
+  aht.getEvent(&aht_humidity, &aht_temp);
+
+  aht_Msg = String("TEL_TEMP_") + String(aht_temp.temperature) + "_CELCIUS\n" +
+            String("TEL_HUMI_") + String(aht_humidity.relative_humidity) + "_PERCENT";
+}
+
+void getPower(Adafruit_INA219 &ina, int powerNum, String &powerMsg) {
+    float busVoltage = ina.getBusVoltage_V();
+    float current_mA = ina.getCurrent_mA();
+    float power_mW   = ina.getPower_mW();
+
+    powerMsg = String("TEL_VOLT")  + String(powerNum) + "_" + String(busVoltage) + "_V\n" +
+               String("TEL_CURR")  + String(powerNum) + "_" + String(current_mA)  + "_mA\n" +
+               String("TEL_POWER") + String(powerNum) + "_" + String(power_mW)   + "_mW";
+}
+
+void getGyro(String &gyroMsg) {
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  gyroMsg = String("TEL_ACC_X_") + String(a.acceleration.x) + "_m/s^2\n" +
+            String("TEL_ACC_Y_") + String(a.acceleration.y) + "_m/s^2\n" +
+            String("TEL_ACC_Z_") + String(a.acceleration.z) + "_m/s^2\n" +
+            String("TEL_GYR_X_") + String(g.gyro.x) + "_rad/s\n" +
+            String("TEL_GYR_Y_") + String(g.gyro.y) + "_rad/s\n" +
+            String("TEL_GYR_Z_") + String(g.gyro.z) + "_rad/s";
+}
+
+void getDist(VL53L0X &sensor, int distNum, String &distMsg) {
+  distMsg = String("TEL_LASER") + String(distNum) + "_" +
+            String(sensor.readRangeContinuousMillimeters()) + "_mm";
 }
 
 void moveBothCCW() {
@@ -410,31 +394,4 @@ void stepBoth(int steps) {
     digitalWrite(STEP2_PIN, LOW);
     delayMicroseconds(STEP_DELAY_US);
   }
-}
-
-void rainbowCycle(int wait) {
-  uint16_t i, j;
-  for (j = 0; j < 256 * 5; j++) { // 5 cycles of all colors
-    for (i = 0; i < LED_COUNT; i++) {
-      uint32_t color = Wheel(((i * 256 / LED_COUNT) + j) & 255);
-      strip1.setPixelColor(i, color);
-      strip2.setPixelColor(i, color);
-    }
-    strip1.show();
-    strip2.show();
-    delay(wait);
-  }
-}
-
-uint32_t Wheel(byte WheelPos) {
-  WheelPos = 255 - WheelPos;
-  if (WheelPos < 85) {
-    return strip1.Color(255 - WheelPos * 3, 0, WheelPos * 3);
-  }
-  if (WheelPos < 170) {
-    WheelPos -= 85;
-    return strip1.Color(0, WheelPos * 3, 255 - WheelPos * 3);
-  }
-  WheelPos -= 170;
-  return strip1.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
 }
