@@ -4,14 +4,14 @@
 
 #define LORA_FREQ 433E6
 
-// LoRa pins for ESP32-CAM
+// LoRa pins
 #define LORA_SCK   14
 #define LORA_MISO  12
 #define LORA_MOSI  13
 #define LORA_SS    15
 #define LORA_DIO0   4
 
-// WS2812 LED strip
+// WS2812: LED strip
 #define LED_PIN    16
 #define NUM_LEDS   8
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -34,32 +34,36 @@ void setup() {
     Serial.println("LoRa init failed!");
     while (true);
   }
-
+  
+  // LoRa settings:
   LoRa.setTxPower(20);
-  LoRa.setSpreadingFactor(12);
-  LoRa.setSignalBandwidth(125E3);
-  LoRa.setCodingRate4(8);
+  LoRa.setSpreadingFactor(10); // Spreading Factor
+  LoRa.setSignalBandwidth(125E3); // BW
+  LoRa.setCodingRate4(5); // Coding Rate
+  LoRa.setSyncWord(0x88); // Sync word
+  LoRa.setPreambleLength(8); // Preamble: 8 symbols
+  LoRa.enableCrc(); // CRC
 
   strip.begin();
-  strip.show(); // turn off LEDs
+  strip.show(); // LED OFF
 }
 
 void loop() {
-  // --- 1. Receive LoRa messages ---
+  // LoRa check, forward to serial
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
     String received = "";
     while (LoRa.available()) {
       received += (char)LoRa.read();
     }
-    received.trim(); // remove whitespace/newlines
+    received.trim();
 
-    // Send acknowledgment back over LoRa
+    // Ack, LoRa
     LoRa.beginPacket();
     LoRa.print("ACK_" + received);
     LoRa.endPacket();
 
-    // --- Check if it's a color command ---
+
     if (received == ".RED") setColor(10,0,0);
     else if (received == ".GREEN") setColor(0,10,0);
     else if (received == ".BLUE") setColor(0,0,10);
@@ -70,16 +74,16 @@ void loop() {
     else if (received == ".ORANGE") setColor(10,4,0);
     else if (received == ".PURPLE") setColor(5,0,10);
     else if (received == ".OFF") setColor(0,0,0);
-    // --- Otherwise, forward to STA via Serial ---
+
     else {
       Serial.println(received);
     }
   }
 
-  // --- 2. Check Serial from STA and forward over LoRa ---
+  // Serial check, forward to LoRa
   while (Serial.available()) {
     String staResponse = Serial.readStringUntil('\n');
-    staResponse.trim(); // clean extra whitespace
+    staResponse.trim();
     if (staResponse.length() > 0) {
       LoRa.beginPacket();
       LoRa.print(staResponse);
