@@ -11,7 +11,6 @@
 VL53L0X sensor1;
 VL53L0X sensor2;
 VL53L0X sensor3;
-
 Adafruit_INA219 ina219_ESP(0x40);
 Adafruit_INA219 ina219_M1(0x41);
 Adafruit_INA219 ina219_M2(0x45);
@@ -19,29 +18,26 @@ Adafruit_SHT31 sht31 = Adafruit_SHT31();
 Adafruit_MPU6050 mpu;
 Adafruit_AHTX0 aht;
 
-// Setup de WiFi (AP)
-const char* ssid     = "Voyager21";  // ID:         AP
-const char* password = "Locker31";   // Contraseña: AP
-
-// // Configuración TCP
-const char* host = "192.168.4.1";   // IP de ESP32
-const uint16_t port = 3131;         // Puerto de AP
-
+// Setup de WiFi (STA)
+const char* ssid     = "Voyager21";   // ID:         AP
+const char* password = "Locker31";    // Contraseña: AP
+const char* AP_IP = "192.168.4.1";     // IP de ESP32
+const uint16_t AP_PORT = 3131;           // Puerto TCP de AP
 WiFiClient client;
+bool staEnabled = false;
+wl_status_t lastStatus = WL_NO_SHIELD;
 
-#define DIR1_PIN 27
+#define DIR1_PIN 27   //Motor1 and Motor2 Pins
 #define STEP1_PIN 26
 #define SLEEP1_PIN 25
 #define DIR2_PIN 18
 #define STEP2_PIN 19
 #define SLEEP2_PIN 5
-
-#define XSHUT1 16
+#define XSHUT1 16     //XSHUT para VL53L0X addresses
 #define XSHUT2 17
 #define XSHUT3 4
-
-// #define RX_PIN    3   // UART RX
-// #define TX_PIN    1   // UART TX
+#define RX_PIN    3   // UART RX desde Serial entrando de LoRa
+#define TX_PIN    1   // UART TX para Serial FWD LoRa
 
 int stepsPerRev = 200;    // 1 revolución por defecto, cambiar con .STEP###
 #define STEP_DELAY_US 2000   // Velocidad
@@ -58,33 +54,7 @@ volatile MotorCommand currentCommand = MOTOR_IDLE;
 
 void setup() {
   Serial.begin(115200);
-  delay(20);
-  Serial.print("Conectando a AP: ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  
-  // Esperar hasta que la conexión WiFi se establezca
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(3000);
-    Serial.print(".");
-  }
-
-  // Conexión establecida
-  Serial.println("\nConectado a AP");
-  Serial.print("STA IP: ");
-  Serial.println(WiFi.localIP().toString());  // keep toString()
-
-  // Intentar Conectar a Servidor TCP en AP
-  Serial.print("Conectando al servidor TCP en ");
-  Serial.print(host);
-  Serial.print(":");
-  Serial.println(port);
-
-  if (client.connect(host, port)) {
-    client.println("SOCKET_SUCCESSFUL_CONNECTION");
-  } else {
-    client.println("ERROR_CONNECTION_AP");
-  }
+  Serial.setDebugOutput(false);
 
   pinMode(DIR1_PIN, OUTPUT);
   pinMode(STEP1_PIN, OUTPUT);
@@ -94,12 +64,12 @@ void setup() {
   pinMode(SLEEP2_PIN, OUTPUT);
   
   xTaskCreatePinnedToCore(
-    motorTask,       // function
-    "MotorTask",     // name
-    4096,            // stack size
-    NULL,            // parameter
-    1,               // priority
-    NULL,            // task handle
+    motorTask,       
+    "MotorTask",     
+    4096,            
+    NULL,            
+    1,               
+    NULL,            
     1                // core 1
   );
 
@@ -107,10 +77,9 @@ void setup() {
   pinMode(XSHUT2, OUTPUT);
   pinMode(XSHUT3, OUTPUT);
 
-  Wire.begin();
-  Serial.setDebugOutput(false);
+  Wire.begin(); // I2C sensores de distancia
 
-  // Apagamos todos los sensores
+  // Apagamos todos los sensores de distancia previo a escribir Address
   digitalWrite(XSHUT1, LOW);
   digitalWrite(XSHUT2, LOW);
   digitalWrite(XSHUT3, LOW);
@@ -138,42 +107,36 @@ void setup() {
   sensor3.startContinuous();
 
   while (!ina219_ESP.begin()) {
-    Serial.println("No se pudo encontrar INA219 del ESP32, reintentando...");
+    Serial.println("ERROR_INA_ESP32");
     delay(20);
   }
-  Serial.println("INA219 Listo");
 
   while (!ina219_M1.begin()) {
-    Serial.println("No se pudo encontrar INA219 del Motor 1, reintentando...");
+    Serial.println("ERROR_INA_MOTOR1");
     delay(20);
   }
-  Serial.println("INA219 Listo");
 
   while (!ina219_M2.begin()) {
-    Serial.println("No se pudo encontrar INA219 del Motor 12, reintentando...");
+    Serial.println("ERROR_INA_MOTOR2");
     delay(20);
   }
-  Serial.println("INA219 Listo");
 
   // Intento de Conexión: SHT31
-  while (!sht31.begin(0x44)) {  // default I2C addr 0x44
-    Serial.println("No se pudo encontrar SHT31, reintentando...");
+  while (!sht31.begin(0x44)) {
+    Serial.println("ERROR_SHT31");
     delay(20);
   }
-  Serial.println("SHT31 Listo.");
 
   // Intento de Conexión: MPU6050
   while (!mpu.begin()) {
-    Serial.println("No se pudo encontrar MPU6050, reintentando...");
+    Serial.println("ERROR_MPU6050");
     delay(20);
   }
-  Serial.println("MPU6050 Listo.");
 
   while (!aht.begin()) {
-    Serial.println("No se pudo encontrar AHT10, reintentando...");
+    Serial.println("ERROR_AHT10");
     delay(20);
   }
-  Serial.println("AHT10 Listo.");
 
   // Configuración MPU6050
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
@@ -182,26 +145,143 @@ void setup() {
 }
 
 void loop() {
-  // Si Existe Conexión, Permitir Comunicación
-  if (client.connected()) {
-    // Revisar Mensajes Entrantes de AP
-    if (client.available()) {
-      String msg = client.readStringUntil('\n');
-      Serial.print("  RECV_AP_");
-      Serial.println(msg);
+  // LoRa Command handling
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
 
-      String ack = "ACK_" + String(msg);
-      client.println(ack);
+    if (cmd.equalsIgnoreCase(".STAON")) {
+      startSTA();
+    }
 
-      msg.trim();
+    else if (cmd.equalsIgnoreCase(".STAOFF")) {
+      stopSTA();
+    }
 
-      if (msg.equalsIgnoreCase(".RSSI")) {
+    else if (cmd.equalsIgnoreCase(".RSSI")) {
+      String rssiMsg;
+      getRSSI(rssiMsg);
+      Serial.println(rssiMsg);
+    }
+
+    else if (cmd.equalsIgnoreCase(".AMBTEMP")) {
+      String sht_Msg;
+      float sht_temp = sht31.readTemperature();
+      getAmbTemp(sht_Msg);
+
+      if (!isnan(sht_temp)) {
+        Serial.println(sht_Msg);
+      } else {
+        Serial.println("ERR_SHT31");
+      }
+    }
+
+    else if (cmd.equalsIgnoreCase(".INTTEMP")) {
+      String aht_Msg;
+      getIntTemp(aht_Msg);
+      Serial.println(aht_Msg);
+    }
+      
+    else if (cmd.startsWith(".POWER")) {
+      int powerNum = cmd.substring(6).toInt(); // POWER1, POWER2, POWER3
+      String powerMsg;
+
+      if (powerNum == 1) {                        // ESP32
+        getPower(ina219_ESP, powerNum, powerMsg);
+        Serial.print(powerMsg);
+      }
+      else if (powerNum == 2) {                   // Motor 1
+        getPower(ina219_M1, powerNum, powerMsg);
+        Serial.print(powerMsg);
+      }
+      else if (powerNum == 3) {                   // Motor 2
+        getPower(ina219_M2, powerNum, powerMsg);
+        Serial.print(powerMsg);
+      }
+      else {
+        Serial.println("ERROR_USE_.POWER1_.POWER2_.POWER3");
+      }
+    }
+
+    else if (cmd.equalsIgnoreCase(".GYRO")) {
+      String gyroMsg;
+      getGyro(gyroMsg);
+      Serial.print(gyroMsg);
+    }
+
+    else if (cmd.startsWith(".DIST")) {
+      int distNum = cmd.substring(5).toInt();
+      String distMsg;
+
+      if (distNum == 1) {
+        getDist(sensor1, distNum, distMsg);
+        Serial.println(distMsg);
+      } 
+      else if (distNum == 2) {
+        getDist(sensor2, distNum, distMsg);
+        Serial.println(distMsg);
+      } 
+      else if (distNum == 3) {
+        getDist(sensor3, distNum, distMsg);
+        Serial.println(distMsg);
+      } 
+      else {
+        Serial.println("ERROR_USE_.DIST1_.DIST2_.DIST3");
+      }
+    }
+
+    else if (cmd.startsWith(".SET")) {
+      int newSteps = cmd.substring(4).toInt();
+      if (newSteps > 0) {
+        stepsPerRev = newSteps;
+        Serial.println("ACT_STEPS_SET_" + String(stepsPerRev));
+      } else {
+        Serial.println("ERROR_INVALID_STEPS");
+      }
+    } 
+
+    else if (cmd.equalsIgnoreCase(".W")) {
+        Serial.println("ACT_FORWARD");
+        currentCommand = MOTOR_BOTH_CW;
+    }
+
+    else if (cmd.equalsIgnoreCase(".S")) {
+        Serial.println("ACT_BACKWARD");
+        currentCommand = MOTOR_BOTH_CCW;
+    }
+
+    else if (cmd.equalsIgnoreCase(".A")) {
+        Serial.println("ACT_LEFT");
+        currentCommand = MOTOR_OPPOSITE_A;
+    }
+
+    else if (cmd.equalsIgnoreCase(".D")) {
+        Serial.println("ACT_RIGHT");
+        currentCommand = MOTOR_OPPOSITE_D;
+    }
+
+    else if (cmd.length() > 0) {
+      // Si no es un comando, no hacer nada (ACK de mensaje no-comando lo hace LoRa)
+    }
+  }
+
+  // Manejo de mensajes WiFi
+  if (staEnabled && client && client.connected() && client.available()) {
+    String wifiCmd = client.readStringUntil('\n');
+    wifiCmd.trim();
+
+    if (wifiCmd.length() > 0) {
+      // WiFi ACK
+      client.print("ACK_");
+      client.println(wifiCmd);
+
+      if (wifiCmd.equalsIgnoreCase(".RSSI")) {
         String rssiMsg;
         getRSSI(rssiMsg);
         client.println(rssiMsg);
       }
 
-      else if (msg.equalsIgnoreCase(".AMBTEMP")) {
+      else if (wifiCmd.equalsIgnoreCase(".AMBTEMP")) {
         String sht_Msg;
         float sht_temp = sht31.readTemperature();
         getAmbTemp(sht_Msg);
@@ -213,25 +293,25 @@ void loop() {
         }
       }
 
-      else if (msg.equalsIgnoreCase(".INTTEMP")) {
+      else if (wifiCmd.equalsIgnoreCase(".INTTEMP")) {
         String aht_Msg;
         getIntTemp(aht_Msg);
         client.println(aht_Msg);
       }
-      
-      else if (msg.startsWith(".POWER")) {
-        int powerNum = msg.substring(6).toInt(); // POWER1, POWER2, POWER3
+        
+      else if (wifiCmd.startsWith(".POWER")) {
+        int powerNum = wifiCmd.substring(6).toInt(); // POWER1, POWER2, POWER3
         String powerMsg;
 
-        if (powerNum == 1) {
+        if (powerNum == 1) {                        // ESP32
           getPower(ina219_ESP, powerNum, powerMsg);
           client.print(powerMsg);
         }
-        else if (powerNum == 2) {
+        else if (powerNum == 2) {                   // Motor 1
           getPower(ina219_M1, powerNum, powerMsg);
           client.print(powerMsg);
         }
-        else if (powerNum == 3) {
+        else if (powerNum == 3) {                   // Motor 2
           getPower(ina219_M2, powerNum, powerMsg);
           client.print(powerMsg);
         }
@@ -240,14 +320,14 @@ void loop() {
         }
       }
 
-      else if (msg.equalsIgnoreCase(".GYRO")) {
+      else if (wifiCmd.equalsIgnoreCase(".GYRO")) {
         String gyroMsg;
         getGyro(gyroMsg);
         client.print(gyroMsg);
       }
 
-      else if (msg.startsWith(".DIST")) {
-        int distNum = msg.substring(5).toInt();
+      else if (wifiCmd.startsWith(".DIST")) {
+        int distNum = wifiCmd.substring(5).toInt();
         String distMsg;
 
         if (distNum == 1) {
@@ -267,8 +347,8 @@ void loop() {
         }
       }
 
-      else if (msg.startsWith(".SET")) {
-        int newSteps = msg.substring(4).toInt();
+      else if (wifiCmd.startsWith(".SET")) {
+        int newSteps = wifiCmd.substring(4).toInt();
         if (newSteps > 0) {
           stepsPerRev = newSteps;
           client.println("ACT_STEPS_SET_" + String(stepsPerRev));
@@ -277,42 +357,100 @@ void loop() {
         }
       } 
 
-      else if (msg.equalsIgnoreCase(".W")) {
-        client.println("ACT_FORWARD");
-        currentCommand = MOTOR_BOTH_CW;
+      else if (wifiCmd.equalsIgnoreCase(".W")) {
+          client.println("ACT_FORWARD");
+          currentCommand = MOTOR_BOTH_CW;
       }
 
-      else if (msg.equalsIgnoreCase(".S")) {
-        client.println("ACT_BACKWARD");
-        currentCommand = MOTOR_BOTH_CCW;
+      else if (wifiCmd.equalsIgnoreCase(".S")) {
+          client.println("ACT_BACKWARD");
+          currentCommand = MOTOR_BOTH_CCW;
       }
 
-      else if (msg.equalsIgnoreCase(".A")) {
-        client.println("ACT_LEFT");
-        currentCommand = MOTOR_OPPOSITE_A;
+      else if (wifiCmd.equalsIgnoreCase(".A")) {
+          client.println("ACT_LEFT");
+          currentCommand = MOTOR_OPPOSITE_A;
       }
 
-      else if (msg.equalsIgnoreCase(".D")) {
-        client.println("ACT_RIGHT");
-        currentCommand = MOTOR_OPPOSITE_D;
+      else if (wifiCmd.equalsIgnoreCase(".D")) {
+          client.println("ACT_RIGHT");
+          currentCommand = MOTOR_OPPOSITE_D;
       }
     }
-
-  } else {
-    // Si se desconecta, intentar reconectar
-    Serial.println("SOCKET_DISCONNECTED_RETRYING");
-    if (client.connect(host, port)) {
-      Serial.println("SOCKET_RECONNECTED");
-    }
-    delay(5000);
   }
 
-  delay(50);
+  // Estados de conexión
+  wl_status_t currentStatus = WiFi.status();
+
+  if (currentStatus != lastStatus) {
+    if (lastStatus == WL_CONNECTED && currentStatus != WL_CONNECTED) {
+      Serial.println("STA_DISCONNECTED");
+      stopSTA();  // Apagar WiFi completamente cuando AP se desconecta
+    } else if (lastStatus != WL_CONNECTED && currentStatus == WL_CONNECTED) {
+      Serial.print("CONNECTED_");
+      Serial.println(WiFi.localIP());
+      staEnabled = true;
+    }
+    lastStatus = currentStatus;
+  }
+}
+
+void startSTA() {
+  if (!staEnabled) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(100);
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    Serial.println("STA_CONN_ATTEMPT");
+
+    unsigned long startAttempt = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 5000) {
+      delay(500);
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("STA_ENABLED");
+      Serial.print("CONNECTED_");
+      Serial.println(WiFi.localIP());
+
+      // Try TCP connect
+      if (client.connect(AP_IP, AP_PORT)) {
+        Serial.println("STA_TCP_CONNECTED");
+      } else {
+        Serial.println("STA_TCP_ERR_CONNECT");
+      }
+
+      staEnabled = true;
+      lastStatus = WL_CONNECTED;
+    } else {
+      Serial.println("STA_ERR_CONNECTION");
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+      staEnabled = false;
+      lastStatus = WL_NO_SHIELD;
+    }
+  } else {
+    Serial.println("STA_WiFi_RUNNING");
+  }
+}
+
+void stopSTA() {
+  if (staEnabled) {
+    WiFi.disconnect(true);  // disconnect and erase config
+    WiFi.mode(WIFI_OFF);    // turn WiFi radio fully off
+    Serial.println("STA_DISABLED");
+    staEnabled = false;
+    lastStatus = WL_NO_SHIELD;
+  } else {
+    Serial.println("STA_WiFi_NOTRUNNING");
+  }
 }
 
 void getRSSI(String &rssiMsg) {
   long rssi = WiFi.RSSI();
-  rssiMsg = "TEL_RSSI_" + String(rssi) + "_dBm";
+  rssiMsg = "TEL_WiFi_RSSI_" + String(rssi) + "_dBm";
 }
 
 void getAmbTemp(String &sht_Msg) {
