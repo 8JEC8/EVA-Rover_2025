@@ -5,7 +5,12 @@ const char* ssid = "Voyager21_AP";
 const char* password = "12345678";
 
 bool staEnabled = false; 
-wl_status_t lastStatus = WL_NO_SHIELD;  // Track last known status
+wl_status_t lastStatus = WL_NO_SHIELD;  // Track Status
+
+// WiFi
+WiFiClient client;    
+const uint16_t AP_PORT = 3131; 
+const char* AP_IP = "192.168.4.1";
 
 // Use UART2 for communication with LoRa ESP
 HardwareSerial LoRaSerial(2); // UART2
@@ -15,14 +20,13 @@ HardwareSerial LoRaSerial(2); // UART2
 
 void startSTA() {
   if (!staEnabled) {
-    // --- Full reset of WiFi stack ---
-    WiFi.disconnect(true);  // erase previous config
-    WiFi.mode(WIFI_OFF);    // turn off WiFi
-    delay(100);             // allow driver to settle
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(100);
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
-    LoRaSerial.print("STA_CONN_ATTEMPT");
+    LoRaSerial.println("STA_CONN_ATTEMPT");
 
     unsigned long startAttempt = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 5000) {
@@ -30,13 +34,21 @@ void startSTA() {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-      LoRaSerial.println("\nSTA_ENABLED");
+      LoRaSerial.println("STA_ENABLED");
       LoRaSerial.print("CONNECTED_");
       LoRaSerial.println(WiFi.localIP());
+
+      // Try TCP connect
+      if (client.connect(AP_IP, AP_PORT)) {
+        LoRaSerial.println("STA_TCP_CONNECTED");
+      } else {
+        LoRaSerial.println("STA_TCP_ERR_CONNECT");
+      }
+
       staEnabled = true;
       lastStatus = WL_CONNECTED;
     } else {
-      LoRaSerial.println("\nSTA_ERR_CONNECTION");
+      LoRaSerial.println("STA_ERR_CONNECTION");
       WiFi.disconnect(true);
       WiFi.mode(WIFI_OFF);
       staEnabled = false;
@@ -66,7 +78,7 @@ void setup() {
 }
 
 void loop() {
-  // --- Command handling ---
+  // LoRa Command handling
   if (LoRaSerial.available()) {
     String cmd = LoRaSerial.readStringUntil('\n');
     cmd.trim();
@@ -76,22 +88,34 @@ void loop() {
     } else if (cmd.equalsIgnoreCase(".STAOFF")) {
       stopSTA();
     } else if (cmd.length() > 0) {
-      LoRaSerial.println(cmd);
+      // If not a command, dont do anything;
     }
   }
 
-  // --- Connection monitoring ---
+  // WiFi handling
+  if (staEnabled && client && client.connected() && client.available()) {
+    String wifiCmd = client.readStringUntil('\n');
+    wifiCmd.trim();
+
+    if (wifiCmd.length() > 0) {
+      // WiFi ACK
+      client.print("ACK_");
+      client.println(wifiCmd);
+    }
+  }
+
+  // Connection States
   wl_status_t currentStatus = WiFi.status();
 
   if (currentStatus != lastStatus) {
     if (lastStatus == WL_CONNECTED && currentStatus != WL_CONNECTED) {
       LoRaSerial.println("STA_DISCONNECTED");
-      staEnabled = false;       // automatically update flag
+      stopSTA();  // Fully shut down WiFi when AP disappears
     } else if (lastStatus != WL_CONNECTED && currentStatus == WL_CONNECTED) {
-      LoRaSerial.println("STA_RECONNECTED");
+      LoRaSerial.println("STA_RECONNECTED");  // Optional, but won’t trigger since STA is off
       LoRaSerial.print("CONNECTED_");
       LoRaSerial.println(WiFi.localIP());
-      staEnabled = true;        // automatically update flag
+      staEnabled = true;
     }
     lastStatus = currentStatus;
   }
