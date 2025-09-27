@@ -1,4 +1,3 @@
-#include <WiFi.h>
 #include <Wire.h>
 #include <Arduino.h>
 #include <Adafruit_INA219.h>
@@ -17,15 +16,6 @@ Adafruit_INA219 ina219_M2(0x45);
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
 Adafruit_MPU6050 mpu;
 Adafruit_AHTX0 aht;
-
-// Setup de WiFi (STA)
-const char* ssid     = "Voyager21";   // ID:         AP
-const char* password = "Locker31";    // Contraseña: AP
-const char* AP_IP = "192.168.4.1";     // IP de ESP32
-const uint16_t AP_PORT = 3131;           // Puerto TCP de AP
-WiFiClient client;
-bool staEnabled = false;
-wl_status_t lastStatus = WL_NO_SHIELD;
 
 #define DIR1_PIN 27   //Motor1 and Motor2 Pins
 #define STEP1_PIN 26
@@ -150,21 +140,7 @@ void loop() {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd.equalsIgnoreCase(".STAON")) {
-      startSTA();
-    }
-
-    else if (cmd.equalsIgnoreCase(".STAOFF")) {
-      stopSTA();
-    }
-
-    else if (cmd.equalsIgnoreCase(".RSSI")) {
-      String rssiMsg;
-      getRSSI(rssiMsg);
-      Serial.println(rssiMsg);
-    }
-
-    else if (cmd.equalsIgnoreCase(".AMBTEMP")) {
+    if (cmd.equalsIgnoreCase(".AMBTEMP")) {
       String sht_Msg;
       float sht_temp = sht31.readTemperature();
       getAmbTemp(sht_Msg);
@@ -263,188 +239,6 @@ void loop() {
     else if (cmd.length() > 0) {
       // Si no es un comando, no hacer nada (ACK de mensaje no-comando lo hace LoRa)
     }
-  }
-
-  // Manejo de mensajes WiFi
-  if (staEnabled && client && client.connected() && client.available()) {
-    String wifiCmd = client.readStringUntil('\n');
-    wifiCmd.trim();
-
-    if (wifiCmd.length() > 0) {
-      // WiFi ACK
-      client.print("ACK_");
-      client.println(wifiCmd);
-
-      if (wifiCmd.equalsIgnoreCase(".RSSI")) {
-        String rssiMsg;
-        getRSSI(rssiMsg);
-        client.println(rssiMsg);
-      }
-
-      else if (wifiCmd.equalsIgnoreCase(".AMBTEMP")) {
-        String sht_Msg;
-        float sht_temp = sht31.readTemperature();
-        getAmbTemp(sht_Msg);
-
-        if (!isnan(sht_temp)) {
-          client.println(sht_Msg);
-        } else {
-          client.println("ERR_SHT31");
-        }
-      }
-
-      else if (wifiCmd.equalsIgnoreCase(".INTTEMP")) {
-        String aht_Msg;
-        getIntTemp(aht_Msg);
-        client.println(aht_Msg);
-      }
-        
-      else if (wifiCmd.startsWith(".POWER")) {
-        int powerNum = wifiCmd.substring(6).toInt(); // POWER1, POWER2, POWER3
-        String powerMsg;
-
-        if (powerNum == 1) {                        // ESP32
-          getPower(ina219_ESP, powerNum, powerMsg);
-          client.print(powerMsg);
-        }
-        else if (powerNum == 2) {                   // Motor 1
-          getPower(ina219_M1, powerNum, powerMsg);
-          client.print(powerMsg);
-        }
-        else if (powerNum == 3) {                   // Motor 2
-          getPower(ina219_M2, powerNum, powerMsg);
-          client.print(powerMsg);
-        }
-        else {
-          client.println("ERROR_USE_.POWER1_.POWER2_.POWER3");
-        }
-      }
-
-      else if (wifiCmd.equalsIgnoreCase(".GYRO")) {
-        String gyroMsg;
-        getGyro(gyroMsg);
-        client.print(gyroMsg);
-      }
-
-      else if (wifiCmd.startsWith(".DIST")) {
-        int distNum = wifiCmd.substring(5).toInt();
-        String distMsg;
-
-        if (distNum == 1) {
-          getDist(sensor1, distNum, distMsg);
-          client.println(distMsg);
-        } 
-        else if (distNum == 2) {
-          getDist(sensor2, distNum, distMsg);
-          client.println(distMsg);
-        } 
-        else if (distNum == 3) {
-          getDist(sensor3, distNum, distMsg);
-          client.println(distMsg);
-        } 
-        else {
-          client.println("ERROR_USE_.DIST1_.DIST2_.DIST3");
-        }
-      }
-
-      else if (wifiCmd.startsWith(".SET")) {
-        int newSteps = wifiCmd.substring(4).toInt();
-        if (newSteps > 0) {
-          stepsPerRev = newSteps;
-          client.println("ACT_STEPS_SET_" + String(stepsPerRev));
-        } else {
-          client.println("ERROR_INVALID_STEPS");
-        }
-      } 
-
-      else if (wifiCmd.equalsIgnoreCase(".W")) {
-          client.println("ACT_FORWARD");
-          currentCommand = MOTOR_BOTH_CW;
-      }
-
-      else if (wifiCmd.equalsIgnoreCase(".S")) {
-          client.println("ACT_BACKWARD");
-          currentCommand = MOTOR_BOTH_CCW;
-      }
-
-      else if (wifiCmd.equalsIgnoreCase(".A")) {
-          client.println("ACT_LEFT");
-          currentCommand = MOTOR_OPPOSITE_A;
-      }
-
-      else if (wifiCmd.equalsIgnoreCase(".D")) {
-          client.println("ACT_RIGHT");
-          currentCommand = MOTOR_OPPOSITE_D;
-      }
-    }
-  }
-
-  // Estados de conexión
-  wl_status_t currentStatus = WiFi.status();
-
-  if (currentStatus != lastStatus) {
-    if (lastStatus == WL_CONNECTED && currentStatus != WL_CONNECTED) {
-      Serial.println("STA_DISCONNECTED");
-      stopSTA();  // Apagar WiFi completamente cuando AP se desconecta
-    } else if (lastStatus != WL_CONNECTED && currentStatus == WL_CONNECTED) {
-      Serial.print("CONNECTED_");
-      Serial.println(WiFi.localIP());
-      staEnabled = true;
-    }
-    lastStatus = currentStatus;
-  }
-}
-
-void startSTA() {
-  if (!staEnabled) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-    delay(100);
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    Serial.println("STA_CONN_ATTEMPT");
-
-    unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 5000) {
-      delay(500);
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("STA_ENABLED");
-      Serial.print("CONNECTED_");
-      Serial.println(WiFi.localIP());
-
-      // Try TCP connect
-      if (client.connect(AP_IP, AP_PORT)) {
-        Serial.println("STA_TCP_CONNECTED");
-      } else {
-        Serial.println("STA_TCP_ERR_CONNECT");
-      }
-
-      staEnabled = true;
-      lastStatus = WL_CONNECTED;
-    } else {
-      Serial.println("STA_ERR_CONNECTION");
-      WiFi.disconnect(true);
-      WiFi.mode(WIFI_OFF);
-      staEnabled = false;
-      lastStatus = WL_NO_SHIELD;
-    }
-  } else {
-    Serial.println("STA_WiFi_RUNNING");
-  }
-}
-
-void stopSTA() {
-  if (staEnabled) {
-    WiFi.disconnect(true);  // disconnect and erase config
-    WiFi.mode(WIFI_OFF);    // turn WiFi radio fully off
-    Serial.println("STA_DISABLED");
-    staEnabled = false;
-    lastStatus = WL_NO_SHIELD;
-  } else {
-    Serial.println("STA_WiFi_NOTRUNNING");
   }
 }
 
