@@ -242,11 +242,6 @@ void loop() {
   }
 }
 
-void getRSSI(String &rssiMsg) {
-  long rssi = WiFi.RSSI();
-  rssiMsg = "TEL_WiFi_RSSI_" + String(rssi) + "_dBm";
-}
-
 void getAmbTemp(String &sht_Msg) {
   float sht_temp = sht31.readTemperature();
   float sht_hum  = sht31.readHumidity();
