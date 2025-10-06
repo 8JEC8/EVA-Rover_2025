@@ -10,6 +10,13 @@ int expectedChunks = 0;
 int receivedChunks = 0;
 bool receivingImage = false;
 
+void requestChunk(int seq) {
+  LoRa.beginPacket();
+  LoRa.print("REQ_" + String(seq));
+  LoRa.endPacket();
+  Serial.printf("Requested chunk %d\n", seq);
+}
+
 void setup() {
   Serial.begin(115200);
   while (!Serial);
@@ -45,43 +52,49 @@ void loop() {
     }
     received.trim();
 
-    // Handle image packets
-    if (received.startsWith("IMG_")) {
+    // Handle image ready signal
+    if (received.startsWith("IMG_READY")) {
+      expectedChunks = received.substring(received.indexOf(',') + 1).toInt();
+      receivedChunks = 0;
+      imgBuffer = "";
+      receivingImage = true;
+      Serial.printf("EXPECTING_%d chunks\n", expectedChunks);
+
+      // Start requesting chunks
+      requestChunk(1);
+    }
+    // Handle image data packets
+    else if (received.startsWith("IMG_")) {
       int slashIdx = received.indexOf('/');
       int commaIdx = received.indexOf(',');
 
       if (slashIdx > 4 && commaIdx > slashIdx) {
         int seq = received.substring(4, slashIdx).toInt();
-        expectedChunks = received.substring(slashIdx + 1, commaIdx).toInt();
+        int total = received.substring(slashIdx + 1, commaIdx).toInt();
         String chunkData = received.substring(commaIdx + 1);
 
-        if (seq == 1) {
-          // Start of image
-          imgBuffer = "";
-          receivingImage = true;
-          receivedChunks = 0;
-          Serial.printf("Starting image reception (%d chunks expected)\n", expectedChunks);
-        }
-
-        if (receivingImage) {
+        if (receivingImage && total == expectedChunks) {
           imgBuffer += chunkData;
           receivedChunks++;
 
-          Serial.printf("Chunk %d/%d: ", seq, expectedChunks);
-          Serial.println(chunkData);
+          Serial.printf("CHUNK_%d/%d received\n", seq, expectedChunks);
 
-          if (seq == expectedChunks) {
+          if (seq < expectedChunks) {
+            requestChunk(seq + 1);
+          } else {
+            // Image complete
             receivingImage = false;
-            Serial.printf("Image reception complete (%d chunks)\n", receivedChunks);
-            Serial.println("-----BASE64 IMAGE START-----");
+            Serial.printf("IMG_RECEPTION_COMPLETE", receivedChunks);
+            Serial.println("B64_IMAGE_START");
             Serial.println(imgBuffer);
-            Serial.println("-----BASE64 IMAGE END-----");
+            Serial.println("B64_IMAGE_END");
 
             imgBuffer = "";
           }
         }
       }
-    } else {
+    }
+    else {
       // Normal message
       String received_message = "  LORA_RECV_STA_" + received + "_" + LoRa.packetRssi() + "_dBm";
       Serial.println(received_message);
