@@ -2,6 +2,7 @@
 #include <LoRa.h>
 #include "esp_camera.h"
 #include "base64.h"   // Arduino Base64 library
+#include <vector>
 
 #define LORA_FREQ 433E6
 
@@ -33,6 +34,10 @@
   #define PCLK_GPIO_NUM     22
   #define LED_FLASH_GPIO    -1
 #endif
+
+// --- Globals for image storage ---
+std::vector<String> imageChunks;
+int totalChunks = 0;
 
 // --- Initialize camera ---
 void initCamera() {
@@ -71,10 +76,15 @@ void initCamera() {
   }
 }
 
-// --- Capture, encode, and send in chunks ---
-void captureAndSendImage() {
-  camera_fb_t *fb_old = esp_camera_fb_get();  // grab current buffer
-  if (fb_old) esp_camera_fb_return(fb_old);   // immediately release it
+// --- Capture and store image ---
+void captureAndStoreImage() {
+  // clear previous image
+  imageChunks.clear();
+  totalChunks = 0;
+
+  // flush old buffer
+  camera_fb_t *fb_old = esp_camera_fb_get();
+  if (fb_old) esp_camera_fb_return(fb_old);
 
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
@@ -88,39 +98,60 @@ void captureAndSendImage() {
 
   int totalLen = encoded.length();
   int chunkSize = 128;
-  int totalChunks = (totalLen + chunkSize - 1) / chunkSize;
+  totalChunks = (totalLen + chunkSize - 1) / chunkSize;
 
-  Serial.printf("Sending image: %d bytes base64, %d chunks\n", totalLen, totalChunks);
+  Serial.printf("Image stored: %d bytes base64, %d chunks\n", totalLen, totalChunks);
 
   for (int i = 0; i < totalChunks; i++) {
     int start = i * chunkSize;
     int end = min(start + chunkSize, totalLen);
-    String chunk = encoded.substring(start, end);
-
-    // Format: IMG_<chunk>/<total>,<data>
-    String packet = "IMG_" + String(i + 1) + "/" + String(totalChunks) + "," + chunk;
-
-    LoRa.beginPacket();
-    LoRa.print(packet);
-    LoRa.endPacket();
-
-    delay(200); // small delay to avoid flooding LoRa
+    imageChunks.push_back(encoded.substring(start, end));
   }
+
+  // Inform receiver
+  LoRa.beginPacket();
+  LoRa.print("IMG_READY," + String(totalChunks));
+  LoRa.endPacket();
+}
+
+// --- Handle incoming commands ---
+void handleRequest(String cmd) {
+  if (cmd == ".IMAGE") {
+    captureAndStoreImage();
+    return;
+  }
+
+  if (cmd.startsWith("REQ_")) {
+    int reqNum = cmd.substring(4).toInt();
+    if (reqNum >= 1 && reqNum <= totalChunks) {
+      String packet = "C_" + imageChunks[reqNum - 1];
+      LoRa.beginPacket();
+      LoRa.print(packet);
+      LoRa.endPacket();
+      Serial.printf("SENT_CHUNK %d/%d\n", reqNum, totalChunks);
+    } else {
+      Serial.println("INVALID_CHUNK_REQUEST");
+    }
+    return;
+  }
+
+  // fallback: just print
+  Serial.println(cmd);
 }
 
 void setup() {
   Serial.begin(115200);
   while (!Serial);
 
-  // LoRa
+  // LoRa setup
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_SS);
   LoRa.setPins(LORA_SS, -1, LORA_DIO0);
 
   if (!LoRa.begin(LORA_FREQ)) {
-    Serial.println("LoRa init failed!");
+    Serial.println("LoRa_ERROR_init");
     while (true);
   }
-  
+
   LoRa.setTxPower(20);
   LoRa.setSpreadingFactor(10);
   LoRa.setSignalBandwidth(125E3);
@@ -134,7 +165,7 @@ void setup() {
 }
 
 void loop() {
-  // LoRa check, forward to serial
+  // LoRa check
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
     String received = "";
@@ -143,19 +174,15 @@ void loop() {
     }
     received.trim();
 
-    // Ack
+    // Acknowledge
     LoRa.beginPacket();
     LoRa.print("ACK_" + received);
     LoRa.endPacket();
 
-    if (received == ".IMAGE") {
-      captureAndSendImage();
-    } else {
-      Serial.println(received);
-    }
+    handleRequest(received);
   }
 
-  // Serial check, forward to LoRa
+  // Serial passthrough to LoRa
   while (Serial.available()) {
     String staResponse = Serial.readStringUntil('\n');
     staResponse.trim();
