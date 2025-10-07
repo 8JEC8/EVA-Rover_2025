@@ -35,11 +35,11 @@
   #define LED_FLASH_GPIO    -1
 #endif
 
-// --- Globals for image storage ---
+// Globals
 std::vector<String> imageChunks;
 int totalChunks = 0;
 
-// --- Initialize camera ---
+// Camera Init
 void initCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -128,7 +128,7 @@ void handleRequest(String cmd) {
       LoRa.beginPacket();
       LoRa.print(packet);
       LoRa.endPacket();
-      Serial.printf("SENT_CHUNK %d/%d\n", reqNum, totalChunks);
+      Serial.printf("SENT_CHUNK_%d/%d\n", reqNum, totalChunks);
     } else {
       Serial.println("INVALID_CHUNK_REQUEST");
     }
@@ -153,7 +153,7 @@ void setup() {
   }
 
   LoRa.setTxPower(20);
-  LoRa.setSpreadingFactor(10);
+  LoRa.setSpreadingFactor(9);
   LoRa.setSignalBandwidth(125E3);
   LoRa.setCodingRate4(5);
   LoRa.setSyncWord(0x88);
