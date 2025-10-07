@@ -10,13 +10,6 @@ int expectedChunks = 0;
 int receivedChunks = 0;
 bool receivingImage = false;
 
-void requestChunk(int seq) {
-  LoRa.beginPacket();
-  LoRa.print("REQ_" + String(seq));
-  LoRa.endPacket();
-  Serial.printf("Requested chunk %d\n", seq);
-}
-
 void setup() {
   Serial.begin(115200);
   while (!Serial);
@@ -58,45 +51,67 @@ void loop() {
       receivedChunks = 0;
       imgBuffer = "";
       receivingImage = true;
-      Serial.printf("EXPECTING_%d chunks\n", expectedChunks);
+      Serial.printf("EXPECTING_%d_CHUNKS\n", expectedChunks);
 
       // Start requesting chunks
       requestChunk(1);
     }
-    // Handle image data packets
-    else if (received.startsWith("IMG_")) {
-      int slashIdx = received.indexOf('/');
-      int commaIdx = received.indexOf(',');
 
-      if (slashIdx > 4 && commaIdx > slashIdx) {
-        int seq = received.substring(4, slashIdx).toInt();
-        int total = received.substring(slashIdx + 1, commaIdx).toInt();
-        String chunkData = received.substring(commaIdx + 1);
+    // Handle simplified C_<chunk> packets with length and Base64 validation
+    else if (received.startsWith("C_")) {
+      if (receivingImage) {
+        String chunkData = received.substring(2); // everything after "C_"
 
-        if (receivingImage && total == expectedChunks) {
+        // Determine expected length for this chunk
+        int expectedLength = 128;
+        if (receivedChunks == expectedChunks - 1) { // last chunk may be shorter
+          expectedLength = -1; // allow any length <= 128 (or compute exact last chunk size if known)
+        }
+
+        // Check length
+        bool lengthOK = (expectedLength == -1 && chunkData.length() <= 128) || (chunkData.length() == expectedLength);
+
+        // Check Base64 characters (A-Z, a-z, 0-9, +, /, =)
+        bool b64OK = true;
+        for (int i = 0; i < chunkData.length(); i++) {
+          char c = chunkData[i];
+          if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=')) {
+            b64OK = false;
+            break;
+          }
+        }
+
+        if (lengthOK && b64OK) {
+          // Chunk is valid
           imgBuffer += chunkData;
           receivedChunks++;
+          Serial.printf("  RECV_CHUNK_%d/%d\n", receivedChunks, expectedChunks);
 
-          Serial.printf("CHUNK_%d/%d received\n", seq, expectedChunks);
-
-          if (seq < expectedChunks) {
-            requestChunk(seq + 1);
+          if (receivedChunks < expectedChunks) {
+            requestChunk(receivedChunks + 1);
           } else {
             // Image complete
             receivingImage = false;
-            Serial.printf("IMG_RECEPTION_COMPLETE", receivedChunks);
+            Serial.printf("IMG_RECEPTION_COMPLETE_%d\n", receivedChunks);
             Serial.println("B64_IMAGE_START");
             Serial.println(imgBuffer);
             Serial.println("B64_IMAGE_END");
 
             imgBuffer = "";
           }
+        } else {
+          // Chunk invalid → request again
+          Serial.printf("CHUNK_%d_INVALID (len=%d, b64=%s) → REQUEST AGAIN\n",
+                        receivedChunks + 1, chunkData.length(), b64OK ? "OK" : "FAIL");
+          requestChunk(receivedChunks + 1);
         }
       }
     }
+
     else {
       // Normal message
-      String received_message = "  LORA_RECV_STA_" + received + "_" + LoRa.packetRssi() + "_dBm";
+      String received_message = "  RECV_ROVER_" + received + "_" + LoRa.packetRssi() + "_dBm";
       Serial.println(received_message);
     }
   }
@@ -131,8 +146,15 @@ void loop() {
       LoRa.print(msg);
       LoRa.endPacket();
 
-      Serial.print("LORA_SENT_AP_");
+      Serial.print("SENT_EST_");
       Serial.println(msg);
     }
   }
+}
+
+void requestChunk(int seq) {
+  LoRa.beginPacket();
+  LoRa.print("REQ_" + String(seq));
+  LoRa.endPacket();
+  Serial.printf("REQUESTING_CHUNK_%d\n", seq);
 }
