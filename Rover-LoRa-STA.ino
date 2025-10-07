@@ -134,78 +134,33 @@ void setup() {
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 }
 
+unsigned long previousMillis = 0;
+const unsigned long interval = 1000; // 1 second
+bool sendCSV = true; // Flag to control CSV sending
+
 void loop() {
-  // LoRa Command handling
+  unsigned long currentMillis = millis();
+
+  // 1. Send CSV every 1 second (non-blocking) only if enabled
+  if (sendCSV && currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    String allCSV = getAllSensorsCSV();
+    Serial.println(allCSV); // Send CSV over LoRa
+  }
+
+  // 2. Handle only motor commands and CSV control
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd.equalsIgnoreCase(".AMBTEMP")) {
-      String sht_Msg;
-      float sht_temp = sht31.readTemperature();
-      getAmbTemp(sht_Msg);
-
-      if (!isnan(sht_temp)) {
-        Serial.println(sht_Msg);
-      } else {
-        Serial.println("ERR_SHT31");
-      }
-    }
-
-    else if (cmd.equalsIgnoreCase(".INTTEMP")) {
-      String aht_Msg;
-      getIntTemp(aht_Msg);
-      Serial.println(aht_Msg);
-    }
-      
-    else if (cmd.startsWith(".POWER")) {
-      int powerNum = cmd.substring(6).toInt(); // POWER1, POWER2, POWER3
-      String powerMsg;
-
-      if (powerNum == 1) {                        // ESP32
-        getPower(ina219_ESP, powerNum, powerMsg);
-        Serial.print(powerMsg);
-      }
-      else if (powerNum == 2) {                   // Motor 1
-        getPower(ina219_M1, powerNum, powerMsg);
-        Serial.print(powerMsg);
-      }
-      else if (powerNum == 3) {                   // Motor 2
-        getPower(ina219_M2, powerNum, powerMsg);
-        Serial.print(powerMsg);
-      }
-      else {
-        Serial.println("ERROR_USE_.POWER1_.POWER2_.POWER3");
-      }
-    }
-
-    else if (cmd.equalsIgnoreCase(".GYRO")) {
-      String gyroMsg;
-      getGyro(gyroMsg);
-      Serial.print(gyroMsg);
-    }
-
-    else if (cmd.startsWith(".DIST")) {
-      int distNum = cmd.substring(5).toInt();
-      String distMsg;
-
-      if (distNum == 1) {
-        getDist(sensor1, distNum, distMsg);
-        Serial.println(distMsg);
-      } 
-      else if (distNum == 2) {
-        getDist(sensor2, distNum, distMsg);
-        Serial.println(distMsg);
-      } 
-      else if (distNum == 3) {
-        getDist(sensor3, distNum, distMsg);
-        Serial.println(distMsg);
-      } 
-      else {
-        Serial.println("ERROR_USE_.DIST1_.DIST2_.DIST3");
-      }
-    }
-
+    if (cmd.equalsIgnoreCase(".START")) {
+      sendCSV = true;
+      Serial.println("CSV_SENDING_STARTED");
+    } 
+    else if (cmd.equalsIgnoreCase(".STOP")) {
+      sendCSV = false;
+      Serial.println("CSV_SENDING_STOPPED");
+    } 
     else if (cmd.startsWith(".SET")) {
       int newSteps = cmd.substring(4).toInt();
       if (newSteps > 0) {
@@ -215,47 +170,78 @@ void loop() {
         Serial.println("ERROR_INVALID_STEPS");
       }
     } 
-
     else if (cmd.equalsIgnoreCase(".W")) {
-        Serial.println("ACT_FORWARD");
-        currentCommand = MOTOR_BOTH_CW;
+      Serial.println("ACT_FORWARD");
+      currentCommand = MOTOR_BOTH_CW;
     }
-
     else if (cmd.equalsIgnoreCase(".S")) {
-        Serial.println("ACT_BACKWARD");
-        currentCommand = MOTOR_BOTH_CCW;
+      Serial.println("ACT_BACKWARD");
+      currentCommand = MOTOR_BOTH_CCW;
     }
-
     else if (cmd.equalsIgnoreCase(".A")) {
-        Serial.println("ACT_LEFT");
-        currentCommand = MOTOR_OPPOSITE_A;
+      Serial.println("ACT_LEFT");
+      currentCommand = MOTOR_OPPOSITE_A;
     }
-
     else if (cmd.equalsIgnoreCase(".D")) {
-        Serial.println("ACT_RIGHT");
-        currentCommand = MOTOR_OPPOSITE_D;
+      Serial.println("ACT_RIGHT");
+      currentCommand = MOTOR_OPPOSITE_D;
     }
-
-    else if (cmd.length() > 0) {
-      // Si no es un comando, no hacer nada (ACK de mensaje no-comando lo hace LoRa)
-    }
+    // Ignorar mensajes ajenos
   }
+}
+
+String getAllSensorsCSV() {
+  String csv = "";
+
+  // 1. Temperatura Amiente
+  String sht_Msg;
+  getAmbTemp(sht_Msg);
+  csv += sht_Msg;
+
+  // 2. Temperatura Interna
+  String aht_Msg;
+  getIntTemp(aht_Msg);
+  csv += "," + aht_Msg;
+
+  // 3. Potencia: ESP, Motores 1 y 2
+  String powerMsg;
+  getPower(ina219_ESP, 1, powerMsg);
+  csv += "," + powerMsg;
+  getPower(ina219_M1, 2, powerMsg);
+  csv += "," + powerMsg;
+  getPower(ina219_M2, 3, powerMsg);
+  csv += "," + powerMsg;
+
+  // 4. Giroscopio
+  String gyroMsg;
+  getGyro(gyroMsg);
+  csv += "," + gyroMsg;
+
+  // 5. Sensores de Distancia
+  String distMsg;
+  getDist(sensor1, 1, distMsg);
+  csv += "," + distMsg;
+  getDist(sensor2, 2, distMsg);
+  csv += "," + distMsg;
+  getDist(sensor3, 3, distMsg);
+  csv += "," + distMsg;
+
+  return csv;
 }
 
 void getAmbTemp(String &sht_Msg) {
   float sht_temp = sht31.readTemperature();
   float sht_hum  = sht31.readHumidity();
 
-  sht_Msg = String("TEL_TEMP_") + String(sht_temp) + "_CELCIUS\n" +
-            String("TEL_HUMI_") + String(sht_hum) + "_PERCENT";
+  sht_Msg = String(sht_temp, 2) + "," + String(sht_hum, 2);
 }
 
 void getIntTemp(String &aht_Msg) {
   sensors_event_t aht_humidity, aht_temp;
   aht.getEvent(&aht_humidity, &aht_temp);
 
-  aht_Msg = String("TEL_TEMP_") + String(aht_temp.temperature) + "_CELCIUS\n" +
-            String("TEL_HUMI_") + String(aht_humidity.relative_humidity) + "_PERCENT";
+  aht_Msg = String(aht_temp.temperature, 2) + "," +
+            String(aht_humidity.relative_humidity, 2);
 }
 
 void getPower(Adafruit_INA219 &ina, int powerNum, String &powerMsg) {
@@ -263,26 +249,25 @@ void getPower(Adafruit_INA219 &ina, int powerNum, String &powerMsg) {
     float current_mA = ina.getCurrent_mA();
     float power_mW   = ina.getPower_mW();
 
-    powerMsg = String("TEL_VOLT")  + String(powerNum) + "_" + String(busVoltage) + "_V\n" +
-               String("TEL_CURR")  + String(powerNum) + "_" + String(current_mA)  + "_mA\n" +
-               String("TEL_POWER") + String(powerNum) + "_" + String(power_mW)   + "_mW";
+    powerMsg = String(busVoltage, 2) + "," +
+               String(current_mA, 2)  + "," +
+               String(power_mW, 2);
 }
 
 void getGyro(String &gyroMsg) {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
-  gyroMsg = String("TEL_ACC_X_") + String(a.acceleration.x) + "_m/s^2\n" +
-            String("TEL_ACC_Y_") + String(a.acceleration.y) + "_m/s^2\n" +
-            String("TEL_ACC_Z_") + String(a.acceleration.z) + "_m/s^2\n" +
-            String("TEL_GYR_X_") + String(g.gyro.x) + "_rad/s\n" +
-            String("TEL_GYR_Y_") + String(g.gyro.y) + "_rad/s\n" +
-            String("TEL_GYR_Z_") + String(g.gyro.z) + "_rad/s";
+  gyroMsg = String(a.acceleration.x, 2) + "," +
+            String(a.acceleration.y, 2) + "," +
+            String(a.acceleration.z, 2) + "," +
+            String(g.gyro.x, 2) + "," +
+            String(g.gyro.y, 2) + "," +
+            String(g.gyro.z, 2);
 }
 
 void getDist(VL53L0X &sensor, int distNum, String &distMsg) {
-  distMsg = String("TEL_LASER") + String(distNum) + "_" +
-            String(sensor.readRangeContinuousMillimeters()) + "_mm";
+  distMsg = String(sensor.readRangeContinuousMillimeters());
 }
 
 void motorTask(void * parameter) {
