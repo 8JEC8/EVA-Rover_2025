@@ -2,19 +2,31 @@
 #include <LoRa.h>
 
 #define LORA_FREQ 433E6
-#define LORA_SS   5
-#define LORA_DIO0 25
+#define LORA_SS   5    // CS
+#define LORA_DIO0 25   // DIO0
 
 String imgBuffer = "";
 int expectedChunks = 0;
 int receivedChunks = 0;
 bool receivingImage = false;
 
+String msgToSend = "";    // Fila de mensaje de monitor serial
+bool msgQueued = false;
+unsigned long lastSendAttempt = 0;
+const unsigned long retryInterval = 500; // ms entre intervalos de envío
+
+const unsigned long ackTimeout = 5000; // 5 segundo de espera en reintento
+unsigned long msgStartTime = 0;        // Cuando el mensaje fue enviado
+
+unsigned long lastChunkRequestTime = 0;
+const unsigned long chunkTimeout = 5000; // 3 segundos para reenviar solicitud de chunk
+
 void setup() {
   Serial.begin(115200);
   while (!Serial);
 
   SPI.begin();
+
   LoRa.setPins(LORA_SS, -1, LORA_DIO0);
 
   if (!LoRa.begin(LORA_FREQ)) {
@@ -22,28 +34,41 @@ void setup() {
     while (true);
   }
 
-  // LoRa Settings
+  // LoRa Settings:
   LoRa.setTxPower(20);
-  LoRa.setSpreadingFactor(10);
-  LoRa.setSignalBandwidth(125E3);
-  LoRa.setCodingRate4(5);
-  LoRa.setSyncWord(0x88);
-  LoRa.setPreambleLength(8);
-  LoRa.enableCrc();
+  LoRa.setSpreadingFactor(9); // Spreading Factor
+  LoRa.setSignalBandwidth(125E3); // BW
+  LoRa.setCodingRate4(5); // Coding Rate
+  LoRa.setSyncWord(0x88); // Sync word
+  LoRa.setPreambleLength(8); // Preamble: 8 symbols
+  LoRa.enableCrc(); // CRC
 
-  Serial.println("\nVoyager21: LoRa Communication Ready");
+  Serial.println("\nVoyager21: Comunicación LoRa Habillitada");
   Serial.println("'.COMLIST' para Lista de Comandos Disponibles");
 }
 
 void loop() {
-  // --- RECV: LoRa ---
+  unsigned long now = millis();
+
+  // --- RECEIVE: LoRa ---
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
     String received = "";
-    while (LoRa.available()) {
-      received += (char)LoRa.read();
-    }
+    while (LoRa.available()) received += (char)LoRa.read();
     received.trim();
+    Serial.println(String("  RECV_ROVER_") + String(LoRa.packetRssi()) + "," + received);
+
+    if (msgQueued && received.startsWith("ACK_")) {
+      String ackFor = received.substring(4);
+      if (ackFor == msgToSend) {
+        msgQueued = false;
+        msgToSend = "";
+
+        if (receivingImage && ackFor.startsWith("REQ_")) {
+            lastChunkRequestTime = now;
+        }
+      }
+    }
 
     // Handle image ready signal
     if (received.startsWith("IMG_READY")) {
@@ -53,25 +78,25 @@ void loop() {
       receivingImage = true;
       Serial.printf("EXPECTING_%d_CHUNKS\n", expectedChunks);
 
-      // Start requesting chunks
-      requestChunk(1);
+      // Start requesting first chunk
+      msgToSend = "REQ_1";
+      msgQueued = true;
+      lastSendAttempt = now;
+      msgStartTime = now;
+      lastChunkRequestTime = now;
     }
 
-    // Handle simplified C_<chunk> packets with length and Base64 validation
+    // Handle chunk data
     else if (received.startsWith("C_")) {
       if (receivingImage) {
-        String chunkData = received.substring(2); // everything after "C_"
+        String chunkData = received.substring(2);
 
-        // Determine expected length for this chunk
         int expectedLength = 128;
-        if (receivedChunks == expectedChunks - 1) { // last chunk may be shorter
-          expectedLength = -1; // allow any length <= 128 (or compute exact last chunk size if known)
-        }
+        if (receivedChunks == expectedChunks - 1) expectedLength = -1;
 
-        // Check length
-        bool lengthOK = (expectedLength == -1 && chunkData.length() <= 128) || (chunkData.length() == expectedLength);
+        bool lengthOK = (expectedLength == -1 && chunkData.length() <= 128) ||
+                        (chunkData.length() == expectedLength);
 
-        // Check Base64 characters (A-Z, a-z, 0-9, +, /, =)
         bool b64OK = true;
         for (int i = 0; i < chunkData.length(); i++) {
           char c = chunkData[i];
@@ -83,71 +108,90 @@ void loop() {
         }
 
         if (lengthOK && b64OK) {
-          // Chunk is valid
           imgBuffer += chunkData;
           receivedChunks++;
           Serial.printf("  RECV_CHUNK_%d/%d\n", receivedChunks, expectedChunks);
 
+          // Request next chunk
           if (receivedChunks < expectedChunks) {
-            requestChunk(receivedChunks + 1);
+            msgToSend = "REQ_" + String(receivedChunks + 1);
+            msgQueued = true;
+            lastSendAttempt = now;
+            msgStartTime = now;
           } else {
-            // Image complete
             receivingImage = false;
             Serial.printf("IMG_RECEPTION_COMPLETE_%d\n", receivedChunks);
             Serial.println("B64_IMAGE_START");
             Serial.println(imgBuffer);
             Serial.println("B64_IMAGE_END");
-
             imgBuffer = "";
           }
         } else {
-          // Chunk invalid → request again
-          Serial.printf("CHUNK_%d_INVALID (len=%d, b64=%s) → REQUEST AGAIN\n",
+          Serial.printf("CHUNK_%d_INVALID(len=%d,b64=%s) → REQUEST AGAIN\n",
                         receivedChunks + 1, chunkData.length(), b64OK ? "OK" : "FAIL");
-          requestChunk(receivedChunks + 1);
+          msgToSend = "REQ_" + String(receivedChunks + 1);
+          msgQueued = true;
+          lastSendAttempt = now;
+          msgStartTime = now;
+          lastChunkRequestTime = now;
         }
       }
     }
+  }
 
-    else {
-      // Normal message
-      String received_message = "  RECV_ROVER_" + received + "_" + LoRa.packetRssi() + "_dBm";
-      Serial.println(received_message);
+  // --- RETRY queued message with timeout ---
+  if (msgQueued) {
+    // Timeout: stop retries
+    if (now - msgStartTime >= ackTimeout) {
+      Serial.println("  MSG_TIMEOUT");
+      msgQueued = false;
+      msgToSend = "";
+    }
+    // Retry if interval passed
+    else if (now - lastSendAttempt >= retryInterval && LoRa.beginPacket()) {
+      LoRa.print(msgToSend);
+      LoRa.endPacket();
+      lastSendAttempt = now;
+      Serial.println("SENT_EST_" + msgToSend);
     }
   }
 
-  // --- SENT: Serial → LoRa ---
-  if (Serial.available()) {
-    String msg = Serial.readStringUntil('\n');
-    msg.trim();
+  if (receivingImage && !msgQueued && (now - lastChunkRequestTime >= chunkTimeout)) {
+    Serial.printf("CHUNK_%d_TIMEOUT_REREQUESTING\n", receivedChunks + 1);
+    msgToSend = "REQ_" + String(receivedChunks + 1);
+    msgQueued = true;
+    lastSendAttempt = now;
+    msgStartTime = now;
+    lastChunkRequestTime = now;
+  }
 
-    if (msg.equalsIgnoreCase(".COMLIST")) {
-      Serial.println(msg);
-      Serial.println("  Lista de Comandos:");
-      Serial.println("    '.RSSI'   : Intensidad de Señal Recibida");
-      Serial.println("    '.AMBTEMP': Lectura de Temperatura y Humedad (Ambiente)");
-      Serial.println("    '.INTTEMP': Lectura de Temperatura y Humedad (Interna)");
-      Serial.println("    '.GYRO'   : Lectura de Acelerómetro y Giroscopio");
-      Serial.println("    '.POWER#' : V,I,Pow ; # = 1 (ESP), 2 (Motor 1), 3 (Motor 3)");
-      Serial.println("    '.DIST#'  : Distancia de Sensor de Laser # = 1, 2, o 3");
-      Serial.println("    '.SET#'   : Selección de Pasos (200 = 1 revolución)");
-      Serial.println("    '.W'      : Movimiento Hacia Adelante");
-      Serial.println("    '.S'      : Movimiento Hacia Atrás");
-      Serial.println("    '.A'      : Movimiento CCW");
-      Serial.println("    '.D'      : Movimiento CW");
-      Serial.println("    '.CALCULATE'    : Calcula la ruta");
-      Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
-      Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
-      Serial.println("    '.SHOW'         : Muestra la ruta caulculada");
-      Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
-      Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
-    } else {
-      LoRa.beginPacket();
-      LoRa.print(msg);
-      LoRa.endPacket();
+  // --- Serial command queue ---
+  while (Serial.available()) {
+    char c = Serial.read();
+    msgToSend += c;
 
-      Serial.print("SENT_EST_");
-      Serial.println(msg);
+    if (c == '\n') {
+      msgToSend.trim();
+
+      if (msgToSend.equalsIgnoreCase(".COMLIST")) {
+        Serial.println("  Lista de Comandos:");
+        Serial.println("    '.W'            : Movimiento Hacia Adelante");
+        Serial.println("    '.S'            : Movimiento Hacia Atrás");
+        Serial.println("    '.A'            : Movimiento CCW");
+        Serial.println("    '.D'            : Movimiento CW");
+        Serial.println("    '.IMAGE'        : Captura de Imagen y Recepción en Chunks");
+        Serial.println("    '.CALCULATE'    : Calcula la ruta");
+        Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
+        Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
+        Serial.println("    '.SHOW'         : Muestra la ruta calculada");
+        Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
+        Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
+        msgToSend = "";
+      } else if (msgToSend.length() > 0) {
+        msgQueued = true;
+        msgStartTime = now;
+        lastSendAttempt = now;
+      }
     }
   }
 }
