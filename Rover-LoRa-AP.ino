@@ -21,7 +21,7 @@ void setup() {
 
   // LoRa Settings:
   LoRa.setTxPower(20);
-  LoRa.setSpreadingFactor(10); // Spreading Factor
+  LoRa.setSpreadingFactor(8); // Spreading Factor
   LoRa.setSignalBandwidth(125E3); // BW
   LoRa.setCodingRate4(5); // Coding Rate
   LoRa.setSyncWord(0x88); // Sync word
@@ -33,51 +33,67 @@ void setup() {
   Serial.println("'.COMLIST' para Lista de Comandos Disponibles");
 }
 
+String msgToSend = "";    // Fila de mensaje de monitor serial
+bool msgQueued = false;
+unsigned long lastSendAttempt = 0;
+const unsigned long retryInterval = 200; // ms entre intervalos de envío
+
 void loop() {
-  // RECV: LoRa
+  unsigned long now = millis();
+
+  // RECV LoRa
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
     String received = "";
-    while (LoRa.available()) {
-      received += (char)LoRa.read();
+    while (LoRa.available()) received += (char)LoRa.read();
+    received.trim();
+    Serial.println(String("  RECV_ROVER_") + String(LoRa.packetRssi()) + "," + received);
+
+    // Revisar ACK: Check si mensaje sí se envió
+    if (msgQueued && received.startsWith("ACK_")) {
+      String ackFor = received.substring(4);
+      if (ackFor == msgToSend) {
+        msgQueued = false;
+        msgToSend = "";
+      }
     }
-    String received_message = "  LORA_RECV_STA_" + received + "_" + LoRa.packetRssi() + "_dBm";
-    Serial.println(received_message);
   }
 
-  // SENT: Serial STA (WiFi + LoRa)
-  if (Serial.available()) {
-    String msg = Serial.readStringUntil('\n');
-    msg.trim();
+  // Reintentar usando mensaje en Fila
+  if (msgQueued && (now - lastSendAttempt >= retryInterval) && LoRa.beginPacket()) {
+    LoRa.print(msgToSend);
+    LoRa.endPacket();
+    lastSendAttempt = now;
+    Serial.println("SENT_EST_" + msgToSend);
+  }
 
-    if (msg.equalsIgnoreCase(".COMLIST")) {
-      Serial.println(msg);
-      Serial.println("  Lista de Comandos:");
-      Serial.println("    '.RSSI'   : Intensidad de Señal Recibida");
-      Serial.println("    '.AMBTEMP': Lectura de Temperatura y Humedad (Ambiente)");
-      Serial.println("    '.INTTEMP': Lectura de Temperatura y Humedad (Interna)");
-      Serial.println("    '.GYRO'   : Lectura de Acelerómetro y Giroscopio");
-      Serial.println("    '.POWER#' : V,I,Pow ; # = 1 (ESP), 2 (Motor 1), 3 (Motor 3)");
-      Serial.println("    '.DIST#'  : Distancia de Sensor de Laser # = 1, 2, o 3");
-      Serial.println("    '.SET#'   : Selección de Pasos (200 = 1 revolución)");
-      Serial.println("    '.W'      : Movimiento Hacia Adelante");
-      Serial.println("    '.S'      : Movimiento Hacia Atrás");
-      Serial.println("    '.A'      : Movimiento CCW");
-      Serial.println("    '.D'      : Movimiento CW");
-      Serial.println("    '.CALCULATE'    : Calcula la ruta");
-      Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
-      Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
-      Serial.println("    '.SHOW'         : Muestra la ruta caulculada");
-      Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
-      Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
-    } else {
-      // LoRa sending
-      LoRa.beginPacket();
-      LoRa.print(msg);
-      LoRa.endPacket();
+  // Comandos Fila
+  while (Serial.available()) {
+    char c = Serial.read();
+    msgToSend += c;
 
-      Serial.print("LORA_SENT_AP_");
-      Serial.println(msg);
+    if (c == '\n') {
+      msgToSend.trim();
+
+      if (msgToSend.equalsIgnoreCase(".COMLIST")) {
+        Serial.println("  Lista de Comandos:");
+        Serial.println("    '.W'          : Movimiento Hacia Adelante");
+        Serial.println("    '.S'          : Movimiento Hacia Atrás");
+        Serial.println("    '.A'          : Movimiento CCW");
+        Serial.println("    '.D'          : Movimiento CW");
+        Serial.println("    '.CALCULATE'  : Calcula la ruta");
+        Serial.println("    '.AUTO'       : Realiza la ruta de manera autonoma");
+        Serial.println("    '.REVERSE'    : Realiza la ruta hacia de manera inversa");
+        Serial.println("    '.SHOW'       : Muestra la ruta calculada");
+        Serial.println("    '.INSTRUCTIONS': Muestra las instrucciones para realizar la ruta");
+        Serial.println("    '.CHANGE'     : Cambiar la meta actual '.CHANGEY,X'");
+        
+        // Limpiar buffer
+        msgToSend = "";
+      } 
+      else if (msgToSend.length() > 0) {
+        msgQueued = true; // Meter en Fila
+      }
     }
   }
 }
