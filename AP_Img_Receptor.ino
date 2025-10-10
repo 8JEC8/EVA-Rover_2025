@@ -212,10 +212,3 @@ void loop() {
     }
   }
 }
-
-void requestChunk(int seq) {
-  LoRa.beginPacket();
-  LoRa.print("REQ_" + String(seq));
-  LoRa.endPacket();
-  Serial.printf("REQUESTING_CHUNK_%d\n", seq);
-}
