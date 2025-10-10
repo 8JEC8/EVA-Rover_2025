@@ -19,7 +19,7 @@ const unsigned long ackTimeout = 5000; // 5 segundo de espera en reintento
 unsigned long msgStartTime = 0;        // Cuando el mensaje fue enviado
 
 unsigned long lastChunkRequestTime = 0;
-const unsigned long chunkTimeout = 5000; // 3 segundos para reenviar solicitud de chunk
+const unsigned long chunkTimeout = 3000; // 3 segundos para reenviar solicitud de chunk
 
 void setup() {
   Serial.begin(115200);
@@ -187,7 +187,24 @@ void loop() {
         Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
         Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
         msgToSend = "";
-      } else if (msgToSend.length() > 0) {
+      }
+
+      else if (msgToSend.equalsIgnoreCase(".CANCEL")) {
+        // Stop any ongoing image reception
+        receivingImage = false;
+        imgBuffer = "";
+        expectedChunks = 0;
+        receivedChunks = 0;
+
+        // Clear queued REQ_ message
+        msgQueued = false;
+        msgToSend = "";
+
+        Serial.println("IMAGE_TRANSFER_CANCELLED");
+        continue;
+      }
+
+      else if (msgToSend.length() > 0) {
         msgQueued = true;
         msgStartTime = now;
         lastSendAttempt = now;
