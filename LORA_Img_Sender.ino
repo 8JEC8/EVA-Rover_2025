@@ -39,6 +39,9 @@
 std::vector<String> imageChunks;
 int totalChunks = 0;
 
+bool receivingTel = false;   // Already exists
+bool wasReceivingTel = false; // NEW flag to remember previous state
+
 // Camera Init
 void initCamera() {
   camera_config_t config;
@@ -71,7 +74,7 @@ void initCamera() {
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x", err);
+    Serial.printf("ERR_CAMERA_INIT0x%x", err);
     while (true);
   }
 }
@@ -88,7 +91,7 @@ void captureAndStoreImage() {
 
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
-    Serial.println("Camera capture failed");
+    Serial.println("CAPTURE_FAILED");
     return;
   }
 
@@ -100,7 +103,7 @@ void captureAndStoreImage() {
   int chunkSize = 128;
   totalChunks = (totalLen + chunkSize - 1) / chunkSize;
 
-  Serial.printf("Image stored: %d bytes base64, %d chunks\n", totalLen, totalChunks);
+  Serial.printf("IMG_STORED_%d_BytesB64_%d_CHUNKS\n", totalLen, totalChunks);
 
   for (int i = 0; i < totalChunks; i++) {
     int start = i * chunkSize;
@@ -116,7 +119,20 @@ void captureAndStoreImage() {
 
 // --- Handle incoming commands ---
 void handleRequest(String cmd) {
+  if (cmd == ".STOP") {
+    receivingTel = false;
+  }
+
+  if (cmd == ".START") {
+    receivingTel = true;
+  }
+
   if (cmd == ".IMAGE") {
+    wasReceivingTel = receivingTel;
+
+    // Stop telemetry and capture image
+    Serial.println(".STOP");
+    receivingTel = false;
     captureAndStoreImage();
     return;
   }
@@ -128,9 +144,13 @@ void handleRequest(String cmd) {
       LoRa.beginPacket();
       LoRa.print(packet);
       LoRa.endPacket();
-      Serial.printf("SENT_CHUNK_%d/%d\n", reqNum, totalChunks);
+
+      if (reqNum == totalChunks && wasReceivingTel) {
+        Serial.println(".START");
+        receivingTel = true;
+      }
     } else {
-      Serial.println("INVALID_CHUNK_REQUEST");
+      // Invalid chunk number
     }
     return;
   }
