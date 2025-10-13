@@ -46,12 +46,16 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
 
-  pinMode(DIR1_PIN, OUTPUT);
-  pinMode(STEP1_PIN, OUTPUT);
-  pinMode(SLEEP1_PIN, OUTPUT);
   pinMode(DIR2_PIN, OUTPUT);
   pinMode(STEP2_PIN, OUTPUT);
   pinMode(SLEEP2_PIN, OUTPUT);
+  pinMode(DIR1_PIN, OUTPUT);
+  pinMode(STEP1_PIN, OUTPUT);
+  pinMode(SLEEP1_PIN, OUTPUT);
+
+  digitalWrite(SLEEP2_PIN, LOW);
+  digitalWrite(SLEEP1_PIN, LOW); // Sleep motores inmediatamente
+
   
   xTaskCreatePinnedToCore(
     motorTask,       
@@ -135,13 +139,13 @@ void setup() {
 }
 
 unsigned long previousMillis = 0;
-const unsigned long interval = 1000; // 1 second
-bool sendCSV = true; // Flag to control CSV sending
+const unsigned long interval = 2500; // 3 second
+bool sendCSV = false; // Flag to control CSV sending
 
 void loop() {
   unsigned long currentMillis = millis();
 
-  // 1. Send CSV every 1 second (non-blocking) only if enabled
+  // 1. Send CSV every "interval" seconds (non-blocking) only if enabled
   if (sendCSV && currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
     String allCSV = getAllSensorsCSV();
@@ -154,13 +158,21 @@ void loop() {
     cmd.trim();
 
     if (cmd.equalsIgnoreCase(".START")) {
-      sendCSV = true;
-      Serial.println("CSV_SENDING_STARTED");
-    } 
+      if (sendCSV) {
+        Serial.println("CSV_ALREADY_STARTED");
+      } else {
+        sendCSV = true;
+        Serial.println("CSV_SENDING_STARTED");
+      }
+    }
     else if (cmd.equalsIgnoreCase(".STOP")) {
-      sendCSV = false;
-      Serial.println("CSV_SENDING_STOPPED");
-    } 
+      if (!sendCSV) {
+        Serial.println("CSV_ALREADY_STOPPED");
+      } else {
+        sendCSV = false;
+        Serial.println("CSV_SENDING_STOPPED");
+      }
+    }
     else if (cmd.startsWith(".SET")) {
       int newSteps = cmd.substring(4).toInt();
       if (newSteps > 0) {
