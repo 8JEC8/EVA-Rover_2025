@@ -38,9 +38,9 @@ void setup() {
   LoRa.setTxPower(20);
   LoRa.setSpreadingFactor(9); // Spreading Factor
   LoRa.setSignalBandwidth(125E3); // BW
-  LoRa.setCodingRate4(5); // Coding Rate
+  LoRa.setCodingRate4(6); // Coding Rate
   LoRa.setSyncWord(0x88); // Sync word
-  LoRa.setPreambleLength(8); // Preamble: 8 symbols
+  LoRa.setPreambleLength(8); // Preamble: 10 symbols
   LoRa.enableCrc(); // CRC
 
   Serial.println("\nVoyager21: Comunicación LoRa Habillitada");
@@ -63,6 +63,27 @@ void loop() {
       if (ackFor == msgToSend) {
         msgQueued = false;
         msgToSend = "";
+
+        if (ackFor == ".SHORT") {
+          LoRa.setSpreadingFactor(7);
+          LoRa.setSignalBandwidth(250E3);
+          LoRa.setCodingRate4(5);
+          LoRa.setPreambleLength(6);
+        }
+
+        if (ackFor == ".MID") {
+          LoRa.setSpreadingFactor(9);
+          LoRa.setSignalBandwidth(125E3);
+          LoRa.setCodingRate4(6);
+          LoRa.setPreambleLength(8);
+        }
+
+        if (ackFor == ".LONG") {
+          LoRa.setSpreadingFactor(11);
+          LoRa.setSignalBandwidth(125E3);
+          LoRa.setCodingRate4(8);
+          LoRa.setPreambleLength(10);
+        }
 
         if (receivingImage && ackFor.startsWith("REQ_")) {
             lastChunkRequestTime = now;
