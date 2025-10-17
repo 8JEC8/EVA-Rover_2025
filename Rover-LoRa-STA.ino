@@ -6,6 +6,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_AHTX0.h>
 #include <VL53L0X.h>
+#include <Adafruit_NeoPixel.h>
 
 VL53L0X sensor1;
 VL53L0X sensor2;
@@ -19,18 +20,22 @@ Adafruit_AHTX0 aht;
 
 #define DIR1_PIN 27   //Motor1 and Motor2 Pins
 #define STEP1_PIN 26
-#define SLEEP1_PIN 25
+#define SLEEP_PIN 25
 #define DIR2_PIN 18
 #define STEP2_PIN 19
-#define SLEEP2_PIN 5
+
 #define XSHUT1 16     //XSHUT para VL53L0X addresses
 #define XSHUT2 17
 #define XSHUT3 4
-#define RX_PIN    3   // UART RX desde Serial entrando de LoRa
-#define TX_PIN    1   // UART TX para Serial FWD LoRa
+#define RX_PIN 3   // UART RX desde Serial entrando de LoRa
+#define TX_PIN 1   // UART TX para Serial FWD LoRa
 
-int stepsPerRev = 200;    // 1 revolución por defecto, cambiar con .STEP###
-#define STEP_DELAY_US 2000   // Velocidad
+#define LED_PIN 5
+#define LED_COUNT 8
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+int stepsPerRev = 6400;    // 1 revolución por defecto, cambiar con .STEP###
+#define STEP_DELAY_US 63   // Velocidad
 
 enum MotorCommand {
   MOTOR_IDLE,
@@ -46,16 +51,16 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
 
+  strip.begin();  // Inicializar strip
+  strip.show();   // Apagar LEDs
+
   pinMode(DIR2_PIN, OUTPUT);
   pinMode(STEP2_PIN, OUTPUT);
-  pinMode(SLEEP2_PIN, OUTPUT);
+  pinMode(SLEEP_PIN, OUTPUT);
   pinMode(DIR1_PIN, OUTPUT);
   pinMode(STEP1_PIN, OUTPUT);
-  pinMode(SLEEP1_PIN, OUTPUT);
 
-  digitalWrite(SLEEP2_PIN, LOW);
-  digitalWrite(SLEEP1_PIN, LOW); // Sleep motores inmediatamente
-
+  digitalWrite(SLEEP_PIN, LOW); // Sleep motores inmediatamente
   
   xTaskCreatePinnedToCore(
     motorTask,       
@@ -139,8 +144,9 @@ void setup() {
 }
 
 unsigned long previousMillis = 0;
-const unsigned long interval = 2500; // 3 second
-bool sendCSV = false; // Flag to control CSV sending
+float intervalSec = 2.5;                      // interval in seconds (default)
+unsigned long interval = intervalSec * 1000;  // converted to ms
+bool sendCSV = false;                         // Flag to control CSV sending
 
 void loop() {
   unsigned long currentMillis = millis();
@@ -173,6 +179,17 @@ void loop() {
         Serial.println("CSV_SENDING_STOPPED");
       }
     }
+    else if (cmd.startsWith(".INTERVAL")) {
+      // Extract numeric part after ".INTERVAL"
+      float newIntervalSec = cmd.substring(9).toFloat(); // handles decimals like 2.5
+      if (newIntervalSec > 0) {
+        intervalSec = newIntervalSec;
+        interval = (unsigned long)(intervalSec * 1000);
+        Serial.println("CSV_INTERVAL_SET_" + String(intervalSec, 2) + "sec");
+      } else {
+        Serial.println("ERROR_INVALID_INTERVAL");
+      }
+    }
     else if (cmd.startsWith(".SET")) {
       int newSteps = cmd.substring(4).toInt();
       if (newSteps > 0) {
@@ -198,14 +215,54 @@ void loop() {
       Serial.println("ACT_RIGHT");
       currentCommand = MOTOR_OPPOSITE_D;
     }
+
+    else if (cmd.equalsIgnoreCase(".RED")) {
+      setColor(50, 0, 0);
+    }
+    else if (cmd.equalsIgnoreCase(".BLUE")) {
+      setColor(0, 0, 50);
+    }
+    else if (cmd.equalsIgnoreCase(".GREEN")) {
+      setColor(0, 50, 0);
+    }
+    else if (cmd.equalsIgnoreCase(".CYAN")) {
+      setColor(0, 50, 50);
+    }
+    else if (cmd.equalsIgnoreCase(".MAGENTA")) {
+      setColor(50, 0, 50);
+    }
+    else if (cmd.equalsIgnoreCase(".YELLOW")) {
+      setColor(50, 50, 0);
+    }
+    else if (cmd.equalsIgnoreCase(".WHITE")) {
+      setColor(50, 50, 50);
+    }
+    else if (cmd.equalsIgnoreCase(".ORANGE")) {
+      setColor(50, 25, 0);
+    }
+    else if (cmd.equalsIgnoreCase(".PURPLE")) {
+      setColor(25, 0, 50);
+    }
+    else if (cmd.equalsIgnoreCase(".OFF")) {
+      setColor(0, 0, 0);
+    }
     // Ignorar mensajes ajenos
   }
+}
+
+
+void setColor(uint8_t red, uint8_t green, uint8_t blue) {
+  uint32_t color = strip.Color(red, green, blue);
+  for (int i = 0; i < LED_COUNT; i++) {
+    strip.setPixelColor(i, color);
+  }
+  strip.show();
 }
 
 String getAllSensorsCSV() {
   String csv = "";
 
-  // 1. Temperatura Amiente
+  // 1. Temperatura Ambiente
   String sht_Msg;
   getAmbTemp(sht_Msg);
   csv += sht_Msg;
@@ -285,8 +342,7 @@ void getDist(VL53L0X &sensor, int distNum, String &distMsg) {
 void motorTask(void * parameter) {
   while (true) {
     if (currentCommand != MOTOR_IDLE) {
-      digitalWrite(SLEEP1_PIN, HIGH);
-      digitalWrite(SLEEP2_PIN, HIGH);
+      digitalWrite(SLEEP_PIN, HIGH);
 
       int dir1 = LOW, dir2 = LOW;
       switch (currentCommand) {
@@ -308,8 +364,7 @@ void motorTask(void * parameter) {
         delayMicroseconds(STEP_DELAY_US);
       }
 
-      digitalWrite(SLEEP1_PIN, LOW);
-      digitalWrite(SLEEP2_PIN, LOW);
+      digitalWrite(SLEEP_PIN, LOW);
 
       currentCommand = MOTOR_IDLE;
     }
