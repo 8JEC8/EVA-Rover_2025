@@ -37,6 +37,13 @@ Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 int stepsPerRev = 6400;    // 1 revolución por defecto, cambiar con .STEP###
 #define STEP_DELAY_US 63   // Velocidad
 
+bool ledBreathing = false;
+bool ledFlashing = false;
+bool ledRainbow = false;
+bool ledDot = false;
+bool ledIdle = true;
+bool ledCam = false; 
+
 enum MotorCommand {
   MOTOR_IDLE,
   MOTOR_BOTH_CW,
@@ -70,6 +77,16 @@ void setup() {
     1,               
     NULL,            
     1                // core 1
+  );
+
+  xTaskCreatePinnedToCore(
+    ledTask,        // Task function
+    "LED Task",     // Name
+    2048,           // Stack size
+    NULL,           // Parameter
+    1,              // Priority
+    NULL,           // Task handle
+    1               // Run on core 1
   );
 
   pinMode(XSHUT1, OUTPUT);
@@ -169,6 +186,8 @@ void loop() {
       } else {
         sendCSV = true;
         Serial.println("CSV_SENDING_STARTED");
+        ledBreathing = true;
+        ledFlashing = ledRainbow = ledDot = false;
       }
     }
     else if (cmd.equalsIgnoreCase(".STOP")) {
@@ -176,6 +195,7 @@ void loop() {
         Serial.println("CSV_ALREADY_STOPPED");
       } else {
         sendCSV = false;
+        ledBreathing = false;
         Serial.println("CSV_SENDING_STOPPED");
       }
     }
@@ -216,35 +236,22 @@ void loop() {
       currentCommand = MOTOR_OPPOSITE_D;
     }
 
-    else if (cmd.equalsIgnoreCase(".RED")) {
-      setColor(50, 0, 0);
+    else if (cmd.equalsIgnoreCase(".FLASH")) {
+      ledFlashing = true;
+      ledBreathing = ledRainbow = ledDot = ledCam = false;
+      Serial.println("LED_MODE_FLASH");
     }
-    else if (cmd.equalsIgnoreCase(".BLUE")) {
-      setColor(0, 0, 50);
+
+    else if (cmd.equalsIgnoreCase(".CAM")) {
+      ledCam = true;
+      ledBreathing = ledFlashing = ledRainbow = ledDot = false;
+      setColor(0, 0, 50); // Blue steady
     }
-    else if (cmd.equalsIgnoreCase(".GREEN")) {
-      setColor(0, 50, 0);
-    }
-    else if (cmd.equalsIgnoreCase(".CYAN")) {
-      setColor(0, 50, 50);
-    }
-    else if (cmd.equalsIgnoreCase(".MAGENTA")) {
-      setColor(50, 0, 50);
-    }
-    else if (cmd.equalsIgnoreCase(".YELLOW")) {
-      setColor(50, 50, 0);
-    }
-    else if (cmd.equalsIgnoreCase(".WHITE")) {
-      setColor(50, 50, 50);
-    }
-    else if (cmd.equalsIgnoreCase(".ORANGE")) {
-      setColor(50, 25, 0);
-    }
-    else if (cmd.equalsIgnoreCase(".PURPLE")) {
-      setColor(25, 0, 50);
-    }
-    else if (cmd.equalsIgnoreCase(".OFF")) {
-      setColor(0, 0, 0);
+
+    else if (cmd.equalsIgnoreCase(".RAINBOW")) {
+      ledRainbow = true;
+      ledBreathing = ledFlashing =  ledDot = ledCam = false;
+      Serial.println("LED_MODE_RAINBOW");
     }
     // Ignorar mensajes ajenos
   }
@@ -343,6 +350,8 @@ void motorTask(void * parameter) {
   while (true) {
     if (currentCommand != MOTOR_IDLE) {
       digitalWrite(SLEEP_PIN, HIGH);
+      ledDot = true;
+      ledBreathing = ledFlashing = ledRainbow = ledCam = false;
 
       int dir1 = LOW, dir2 = LOW;
       switch (currentCommand) {
@@ -365,10 +374,94 @@ void motorTask(void * parameter) {
       }
 
       digitalWrite(SLEEP_PIN, LOW);
+      ledDot = false;
+
+      if (sendCSV) {
+        ledBreathing = true;
+        ledFlashing = ledRainbow = ledDot = ledCam = false;
+      }
 
       currentCommand = MOTOR_IDLE;
     }
 
     vTaskDelay(1);
+  }
+}
+
+void ledTask(void *parameter) {
+  unsigned long previousMillis = 0;
+  int brightness = 0;
+  int fadeAmount = 5;
+  static int dotIndex = 0;
+  static int dotDirection = 1;
+  static uint16_t rainbowOffset = 0;
+
+  while (true) {
+    if (ledBreathing) {
+      // Slow breathing purple
+      float level = (sin(millis() / 500.0) + 1.0) / 2.0; // 0–1 sine wave
+      setColor(0, 10 * level, 0);
+      vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+
+    else if (ledFlashing) {
+      // Flashing yellow
+      static bool state = false;
+      state = !state;
+      if (state) setColor(20, 20, 0);
+      else setColor(0, 0, 0);
+      vTaskDelay(300 / portTICK_PERIOD_MS);
+    }
+
+    else if (ledRainbow) {
+      strip.setBrightness(50);
+      
+      for (int i = 0; i < LED_COUNT; i++) {
+        int pixelHue = (i * 65536L / LED_COUNT) + rainbowOffset;
+        strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
+      }
+      strip.show();
+      rainbowOffset += 256; // controls rainbow speed
+      vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+
+    else if (ledDot) {
+      strip.clear();
+
+      // Light the current LED and the next one (no wraparound)
+      strip.setPixelColor(dotIndex, strip.Color(0, 0, 15));      // main blue
+      strip.setPixelColor(dotIndex + 1, strip.Color(0, 0, 15));  // next LED
+      strip.setPixelColor(dotIndex + 2, strip.Color(0, 0, 15));  // next LED
+
+      strip.show();
+
+      dotIndex += dotDirection;
+
+      // Reverse direction when the leading LED reaches the end
+      if (dotIndex >= LED_COUNT - 2 || dotIndex <= 0) {
+        dotDirection = -dotDirection;
+      }
+
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+
+    else if (ledCam) {
+      setColor(25, 25, 25);
+      strip.show();
+      vTaskDelay(500 / portTICK_PERIOD_MS);
+      ledCam = false;
+    }
+
+    else if (!ledBreathing && !ledFlashing && !ledRainbow && !ledDot && !ledCam) {
+      float level = (sin(millis() / 500.0) + 1.0) / 2.0;
+      setColor(0, 2 * level, 2 * level); // soft cyan
+      vTaskDelay(30 / portTICK_PERIOD_MS);
+    }
+
+    else {
+      // All off
+      setColor(0, 0, 0);
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
   }
 }
