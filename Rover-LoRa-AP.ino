@@ -210,6 +210,36 @@ void loop() {
         msgToSend = "";
       }
 
+      else if (msgToSend.equalsIgnoreCase(".FORCESHORT")) {
+          Serial.println("MANUAL_CHANGE_SF7");
+          LoRa.setSpreadingFactor(7);
+          LoRa.setSignalBandwidth(250E3);
+          LoRa.setCodingRate4(5);
+          LoRa.setPreambleLength(6);
+          msgToSend = "";
+          msgQueued = false;
+        }
+
+      else if (msgToSend.equalsIgnoreCase(".FORCEMID")) {
+          Serial.println("MANUAL_CHANGE_SF9");
+          LoRa.setSpreadingFactor(9);
+          LoRa.setSignalBandwidth(125E3);
+          LoRa.setCodingRate4(6);
+          LoRa.setPreambleLength(8);
+          msgToSend = "";
+          msgQueued = false;
+        }
+
+      else if (msgToSend.equalsIgnoreCase(".FORCELONG")) {
+          Serial.println("MANUAL_CHANGE_SF11");
+          LoRa.setSpreadingFactor(11);
+          LoRa.setSignalBandwidth(125E3);
+          LoRa.setCodingRate4(8);
+          LoRa.setPreambleLength(10);
+          msgToSend = "";
+          msgQueued = false;
+        }
+
       else if (msgToSend.equalsIgnoreCase(".CANCEL")) {
         // Stop any ongoing image reception
         receivingImage = false;
