@@ -119,12 +119,36 @@ void captureAndStoreImage() {
 
 // --- Handle incoming commands ---
 void handleRequest(String cmd) {
+  if (cmd == ".START") {
+    receivingTel = true;
+  }
+
   if (cmd == ".STOP") {
     receivingTel = false;
   }
 
-  if (cmd == ".START") {
-    receivingTel = true;
+  if (cmd == ".SHORT") {
+    LoRa.setSpreadingFactor(7);
+    LoRa.setSignalBandwidth(250E3);
+    LoRa.setCodingRate4(5);
+    LoRa.setPreambleLength(6);
+    Serial.println(".INTERVAL1.0");
+  }
+
+  if (cmd == ".MID") {
+    LoRa.setSpreadingFactor(9);
+    LoRa.setSignalBandwidth(125E3);
+    LoRa.setCodingRate4(6);
+    LoRa.setPreambleLength(8);
+    Serial.println(".INTERVAL2.0");
+  }
+
+  if (cmd == ".LONG") {
+    LoRa.setSpreadingFactor(11);
+    LoRa.setSignalBandwidth(125E3);
+    LoRa.setCodingRate4(8);
+    LoRa.setPreambleLength(10);
+    Serial.println(".INTERVAL8.0");
   }
 
   if (cmd == ".IMAGE") {
@@ -133,6 +157,7 @@ void handleRequest(String cmd) {
     // Stop telemetry and capture image
     Serial.println(".STOP");
     receivingTel = false;
+    Serial.println(".CAM");
     captureAndStoreImage();
     return;
   }
@@ -175,7 +200,7 @@ void setup() {
   LoRa.setTxPower(20);
   LoRa.setSpreadingFactor(9);
   LoRa.setSignalBandwidth(125E3);
-  LoRa.setCodingRate4(5);
+  LoRa.setCodingRate4(6);
   LoRa.setSyncWord(0x88);
   LoRa.setPreambleLength(8);
   LoRa.enableCrc();
@@ -198,6 +223,10 @@ void loop() {
     LoRa.beginPacket();
     LoRa.print("ACK_" + received);
     LoRa.endPacket();
+
+    if (received == ".SHORT" || received == ".MID" || received == ".LONG") {
+      delay(20);  // 20 ms pause to ensure ACK finishes
+    }
 
     handleRequest(received);
   }
