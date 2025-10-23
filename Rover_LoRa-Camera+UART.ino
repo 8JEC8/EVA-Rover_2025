@@ -38,6 +38,7 @@
 // Globals
 std::vector<String> imageChunks;
 int totalChunks = 0;
+int chunkSize = 128;
 
 bool receivingTel = false;   // Already exists
 bool wasReceivingTel = false; // NEW flag to remember previous state
@@ -100,7 +101,6 @@ void captureAndStoreImage() {
   esp_camera_fb_return(fb);
 
   int totalLen = encoded.length();
-  int chunkSize = 128;
   totalChunks = (totalLen + chunkSize - 1) / chunkSize;
 
   Serial.printf("IMG_STORED_%d_BytesB64_%d_CHUNKS\n", totalLen, totalChunks);
@@ -125,6 +125,25 @@ void handleRequest(String cmd) {
 
   if (cmd == ".STOP") {
     receivingTel = false;
+  }
+
+  if (cmd.startsWith(".CHUNK")) {
+      String numStr = cmd.substring(6);
+      int newSize = numStr.toInt();
+
+      // Validate: must be > 0 and <= 200
+      if (newSize > 0 && newSize <= 200) {
+        chunkSize = newSize;
+        LoRa.beginPacket();
+        LoRa.print("SET_CHUNKS_" + String(chunkSize));
+        LoRa.endPacket();
+      }
+      
+      else {
+        LoRa.beginPacket();
+        LoRa.print("INVALID_CHUNKS");
+        LoRa.endPacket();
+      }
   }
 
   if (cmd == ".SHORT") {
@@ -225,7 +244,7 @@ void loop() {
     LoRa.endPacket();
 
     if (received == ".SHORT" || received == ".MID" || received == ".LONG") {
-      delay(20);  // 20 ms pause to ensure ACK finishes
+      delay(100);  // 100 ms pause to ensure ACK finishes
     }
 
     handleRequest(received);
