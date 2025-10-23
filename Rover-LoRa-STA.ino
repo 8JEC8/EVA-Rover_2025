@@ -44,6 +44,14 @@ bool ledDot = false;
 bool ledIdle = true;
 bool ledCam = false; 
 
+unsigned long previousMillis = 0;
+float intervalSec = 2.5;                      // interval in seconds (default)
+unsigned long interval = intervalSec * 1000;  // converted to ms
+bool sendCSV = false;                         // Flag to control CSV sending
+
+#define CSV_BUFFER_SIZE 96
+char csvBuffer[CSV_BUFFER_SIZE];
+
 enum MotorCommand {
   MOTOR_IDLE,
   MOTOR_BOTH_CW,
@@ -160,10 +168,7 @@ void setup() {
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 }
 
-unsigned long previousMillis = 0;
-float intervalSec = 2.5;                      // interval in seconds (default)
-unsigned long interval = intervalSec * 1000;  // converted to ms
-bool sendCSV = false;                         // Flag to control CSV sending
+
 
 void loop() {
   unsigned long currentMillis = millis();
@@ -171,8 +176,8 @@ void loop() {
   // 1. Send CSV every "interval" seconds (non-blocking) only if enabled
   if (sendCSV && currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
-    String allCSV = getAllSensorsCSV();
-    Serial.println(allCSV); // Send CSV over LoRa
+    getAllSensorsCSV();
+    Serial.println(csvBuffer); // Send CSV over LoRa
   }
 
   // 2. Handle only motor commands and CSV control
@@ -257,6 +262,80 @@ void loop() {
   }
 }
 
+String getAllSensorsCSV() {
+  // Leer sensores: SHT , AHT , ESP , M1 , M2 , MPU , DIST
+  float sht_temp = sht31.readTemperature();
+  float sht_hum  = sht31.readHumidity();
+
+  sensors_event_t aht_humidity, aht_temp;
+  aht.getEvent(&aht_humidity, &aht_temp);
+
+  float int_temp = aht_temp.temperature;
+  float int_hum  = aht_humidity.relative_humidity;
+
+  // V,I,P
+  float espBusV = ina219_ESP.getBusVoltage_V();
+  float espCurrent = ina219_ESP.getCurrent_mA();
+  float espPower = ina219_ESP.getPower_mW();
+
+  float m1BusV = ina219_M1.getBusVoltage_V();
+  float m1Current = ina219_M1.getCurrent_mA();
+  float m1Power = ina219_M1.getPower_mW();
+
+  float m2BusV = ina219_M2.getBusVoltage_V();
+  float m2Current = ina219_M2.getCurrent_mA();
+  float m2Power = ina219_M2.getPower_mW();
+
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  int dist1 = sensor1.readRangeContinuousMillimeters();
+  int dist2 = sensor2.readRangeContinuousMillimeters();
+  int dist3 = sensor3.readRangeContinuousMillimeters();
+
+  // Escalar valores, 2 decimales excepto Is
+  int16_t sht_temp_i = sht_temp * 100;
+  int16_t sht_hum_i  = sht_hum  * 100;
+  int16_t int_temp_i = int_temp * 100;
+  int16_t int_hum_i  = int_hum  * 100;
+
+  int16_t espBusV_i = espBusV * 100;
+  int16_t espCurrent_i = espCurrent * 10; // 0.1mA, no overflow
+  int16_t espPower_i = espPower;          // mW
+
+  int16_t m1BusV_i = m1BusV * 100;
+  int16_t m1Current_i = m1Current * 10;
+  int16_t m1Power_i = m1Power;
+
+  int16_t m2BusV_i = m2BusV * 100;
+  int16_t m2Current_i = m2Current * 10;
+  int16_t m2Power_i = m2Power;
+
+  int16_t accX_i = a.acceleration.x * 100;
+  int16_t accY_i = a.acceleration.y * 100;
+  int16_t accZ_i = a.acceleration.z * 100;
+  int16_t gyroX_i = g.gyro.x * 100;
+  int16_t gyroY_i = g.gyro.y * 100;
+  int16_t gyroZ_i = g.gyro.z * 100;
+
+  // CSV
+  snprintf(csvBuffer, CSV_BUFFER_SIZE,
+    "%d,%d,%d,%d,"      // SHT, AHT
+    "%d,%d,%d,"         // ESP
+    "%d,%d,%d,"         // M1
+    "%d,%d,%d,"         // M2
+    "%d,%d,%d,%d,%d,%d,"// Acc + Gyro
+    "%d,%d,%d",         // Dist
+    sht_temp_i, sht_hum_i, int_temp_i, int_hum_i,
+    espBusV_i, espCurrent_i, espPower_i,
+    m1BusV_i, m1Current_i, m1Power_i,
+    m2BusV_i, m2Current_i, m2Power_i,
+    accX_i, accY_i, accZ_i, gyroX_i, gyroY_i, gyroZ_i,
+    dist1, dist2, dist3
+  );
+
+  return String(csvBuffer);
+}
 
 void setColor(uint8_t red, uint8_t green, uint8_t blue) {
   uint32_t color = strip.Color(red, green, blue);
@@ -264,86 +343,6 @@ void setColor(uint8_t red, uint8_t green, uint8_t blue) {
     strip.setPixelColor(i, color);
   }
   strip.show();
-}
-
-String getAllSensorsCSV() {
-  String csv = "";
-
-  // 1. Temperatura Ambiente
-  String sht_Msg;
-  getAmbTemp(sht_Msg);
-  csv += sht_Msg;
-
-  // 2. Temperatura Interna
-  String aht_Msg;
-  getIntTemp(aht_Msg);
-  csv += "," + aht_Msg;
-
-  // 3. Potencia: ESP, Motores 1 y 2
-  String powerMsg;
-  getPower(ina219_ESP, 1, powerMsg);
-  csv += "," + powerMsg;
-  getPower(ina219_M1, 2, powerMsg);
-  csv += "," + powerMsg;
-  getPower(ina219_M2, 3, powerMsg);
-  csv += "," + powerMsg;
-
-  // 4. Giroscopio
-  String gyroMsg;
-  getGyro(gyroMsg);
-  csv += "," + gyroMsg;
-
-  // 5. Sensores de Distancia
-  String distMsg;
-  getDist(sensor1, 1, distMsg);
-  csv += "," + distMsg;
-  getDist(sensor2, 2, distMsg);
-  csv += "," + distMsg;
-  getDist(sensor3, 3, distMsg);
-  csv += "," + distMsg;
-
-  return csv;
-}
-
-void getAmbTemp(String &sht_Msg) {
-  float sht_temp = sht31.readTemperature();
-  float sht_hum  = sht31.readHumidity();
-
-  sht_Msg = String(sht_temp, 2) + "," + String(sht_hum, 2);
-}
-
-void getIntTemp(String &aht_Msg) {
-  sensors_event_t aht_humidity, aht_temp;
-  aht.getEvent(&aht_humidity, &aht_temp);
-
-  aht_Msg = String(aht_temp.temperature, 2) + "," +
-            String(aht_humidity.relative_humidity, 2);
-}
-
-void getPower(Adafruit_INA219 &ina, int powerNum, String &powerMsg) {
-    float busVoltage = ina.getBusVoltage_V();
-    float current_mA = ina.getCurrent_mA();
-    float power_mW   = ina.getPower_mW();
-
-    powerMsg = String(busVoltage, 2) + "," +
-               String(current_mA, 2)  + "," +
-               String(power_mW, 2);
-}
-
-void getGyro(String &gyroMsg) {
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
-
-  gyroMsg = String(a.acceleration.x, 2) + "," +
-            String(a.acceleration.y, 2) + "," +
-            String(a.acceleration.z, 2) + "," +
-            String(g.gyro.x, 2) + "," +
-            String(g.gyro.y, 2) + "," +
-            String(g.gyro.z, 2);
-}
-
-void getDist(VL53L0X &sensor, int distNum, String &distMsg) {
-  distMsg = String(sensor.readRangeContinuousMillimeters());
 }
 
 void motorTask(void * parameter) {
