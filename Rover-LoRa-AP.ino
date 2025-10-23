@@ -10,16 +10,18 @@ int expectedChunks = 0;
 int receivedChunks = 0;
 bool receivingImage = false;
 
-String msgToSend = "";    // Fila de mensaje de monitor serial
+String msgToSend = "";                    // Fila de mensaje de monitor serial
 bool msgQueued = false;
 unsigned long lastSendAttempt = 0;
-const unsigned long retryInterval = 500; // ms entre intervalos de envío
+unsigned long retryInterval = 500;        // Default LoRa MID: ms entre intervalos de envío
 
-const unsigned long ackTimeout = 5000; // 5 segundo de espera en reintento
-unsigned long msgStartTime = 0;        // Cuando el mensaje fue enviado
+unsigned long ackTimeout = 5000;          // Default LoRa MID: 5 segundo de espera en reintento
+unsigned long msgStartTime = 0;           // Cuando el mensaje fue enviado
 
 unsigned long lastChunkRequestTime = 0;
-const unsigned long chunkTimeout = 3000; // 3 segundos para reenviar solicitud de chunk
+unsigned long chunkTimeout = 3000;        // Default LoRa MID: 3 segundos para reenviar solicitud de chunk
+
+int expectedLength = 128;
 
 void setup() {
   Serial.begin(115200);
@@ -65,28 +67,25 @@ void loop() {
         msgToSend = "";
 
         if (ackFor == ".SHORT") {
-          LoRa.setSpreadingFactor(7);
-          LoRa.setSignalBandwidth(250E3);
-          LoRa.setCodingRate4(5);
-          LoRa.setPreambleLength(6);
+          LoRaShort();
+          msgToSend = "";
+          msgQueued = false;
         }
 
         if (ackFor == ".MID") {
-          LoRa.setSpreadingFactor(9);
-          LoRa.setSignalBandwidth(125E3);
-          LoRa.setCodingRate4(6);
-          LoRa.setPreambleLength(8);
+          LoRaMid();
+          msgToSend = "";
+          msgQueued = false;
         }
 
         if (ackFor == ".LONG") {
-          LoRa.setSpreadingFactor(11);
-          LoRa.setSignalBandwidth(125E3);
-          LoRa.setCodingRate4(8);
-          LoRa.setPreambleLength(10);
+          LoRaLong();
+          msgToSend = "";
+          msgQueued = false;
         }
 
         if (receivingImage && ackFor.startsWith("REQ_")) {
-            lastChunkRequestTime = now;
+          lastChunkRequestTime = now;
         }
       }
     }
@@ -112,7 +111,6 @@ void loop() {
       if (receivingImage) {
         String chunkData = received.substring(2);
 
-        int expectedLength = 128;
         if (receivedChunks == expectedChunks - 1) expectedLength = -1;
 
         bool lengthOK = (expectedLength == -1 && chunkData.length() <= 128) ||
@@ -195,47 +193,31 @@ void loop() {
       msgToSend.trim();
 
       if (msgToSend.equalsIgnoreCase(".COMLIST")) {
-        Serial.println("  Lista de Comandos:");
-        Serial.println("    '.W'            : Movimiento Hacia Adelante");
-        Serial.println("    '.S'            : Movimiento Hacia Atrás");
-        Serial.println("    '.A'            : Movimiento CCW");
-        Serial.println("    '.D'            : Movimiento CW");
-        Serial.println("    '.IMAGE'        : Captura de Imagen y Recepción en Chunks");
-        Serial.println("    '.CALCULATE'    : Calcula la ruta");
-        Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
-        Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
-        Serial.println("    '.SHOW'         : Muestra la ruta calculada");
-        Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
-        Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
+        printCommandList();
         msgToSend = "";
+        msgQueued = false;
       }
 
+      else if (msgToSend.startsWith(".CHUNK")) {
+          String numStr = msgToSend.substring(6);
+          int newSize = numStr.toInt();
+          expectedLength = newSize;
+        }
+
       else if (msgToSend.equalsIgnoreCase(".FORCESHORT")) {
-          Serial.println("MANUAL_CHANGE_SF7");
-          LoRa.setSpreadingFactor(7);
-          LoRa.setSignalBandwidth(250E3);
-          LoRa.setCodingRate4(5);
-          LoRa.setPreambleLength(6);
+          LoRaShort();
           msgToSend = "";
           msgQueued = false;
         }
 
-      else if (msgToSend.equalsIgnoreCase(".FORCEMID")) {
-          Serial.println("MANUAL_CHANGE_SF9");
-          LoRa.setSpreadingFactor(9);
-          LoRa.setSignalBandwidth(125E3);
-          LoRa.setCodingRate4(6);
-          LoRa.setPreambleLength(8);
+      else if (msgToSend.equalsIgnoreCase(".FORCEMID")) {  
+          LoRaMid();
           msgToSend = "";
           msgQueued = false;
         }
 
       else if (msgToSend.equalsIgnoreCase(".FORCELONG")) {
-          Serial.println("MANUAL_CHANGE_SF11");
-          LoRa.setSpreadingFactor(11);
-          LoRa.setSignalBandwidth(125E3);
-          LoRa.setCodingRate4(8);
-          LoRa.setPreambleLength(10);
+          LoRaLong();
           msgToSend = "";
           msgQueued = false;
         }
@@ -262,4 +244,52 @@ void loop() {
       }
     }
   }
+}
+
+void LoRaShort() {
+  Serial.println("LoRa_CHANGE_SF7");
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSignalBandwidth(250E3);
+  LoRa.setCodingRate4(5);
+  LoRa.setPreambleLength(6);
+  retryInterval = 300;
+  ackTimeout = 3000;
+  chunkTimeout = 2000;
+}
+
+void LoRaMid() {
+  Serial.println("LoRa_CHANGE_SF9");
+  LoRa.setSpreadingFactor(9);
+  LoRa.setSignalBandwidth(125E3);
+  LoRa.setCodingRate4(6);
+  LoRa.setPreambleLength(8);
+  retryInterval = 500;
+  ackTimeout = 5000;
+  chunkTimeout = 3000;
+}
+
+void LoRaLong() {
+  Serial.println("LoRa_CHANGE_SF11");
+  LoRa.setSpreadingFactor(11);
+  LoRa.setSignalBandwidth(125E3);
+  LoRa.setCodingRate4(8);
+  LoRa.setPreambleLength(10);
+  retryInterval = 2000;
+  ackTimeout = 8000;
+  chunkTimeout = 5000;
+}
+
+void printCommandList() {
+  Serial.println("  Lista de Comandos:");
+  Serial.println("    '.W'            : Movimiento Hacia Adelante");
+  Serial.println("    '.S'            : Movimiento Hacia Atrás");
+  Serial.println("    '.A'            : Movimiento CCW");
+  Serial.println("    '.D'            : Movimiento CW");
+  Serial.println("    '.IMAGE'        : Captura de Imagen y Recepción en Chunks");
+  Serial.println("    '.CALCULATE'    : Calcula la ruta");
+  Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
+  Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
+  Serial.println("    '.SHOW'         : Muestra la ruta calculada");
+  Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
+  Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
 }
