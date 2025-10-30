@@ -6,6 +6,7 @@
 
 // ====== Embedded HTML======
 const char index_html[] PROGMEM = R"rawliteral(
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -130,11 +131,34 @@ const char index_html[] PROGMEM = R"rawliteral(
     font-size: 4rem;
     border: none;
     border-radius: 8px;
-    background-color: #007bff;
+    background-color: #ff5e00;
     color: white;
     cursor: pointer;
     width: 120px;
     height: 120px;
+  }
+
+  .control-button:hover {
+  background-color: #db5000;
+  transform: scale(1.05);
+  }
+
+  .command-button {
+  padding: 20px;
+  font-size: 1.5rem;
+  border: none;
+  border-radius: 15px;
+  background-color: #0077cc; /* Blue tone */
+  color: white;
+  cursor: pointer;
+  width: 170px;
+  height: 170px;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  }
+
+  .command-button:hover {
+  background-color: #005fa3;
+  transform: scale(1.05);
   }
 
   .control-up { grid-area: up; }
@@ -142,19 +166,14 @@ const char index_html[] PROGMEM = R"rawliteral(
   .control-left { grid-area: left; }
   .control-right { grid-area: right; }
 
-  /* Image button box */
-  .image-button-box {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 400px;
-    height: 200px;
-  }
-
-  #requestImage {
-    width: 180px;
-    height: 100px;
-    font-size: 1.5rem;
+  .command-button-box {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0px 30px;              /* spacing between the two buttons */
+  width: 400px;
+  height: 400px;
+  flex-wrap: wrap;        /* ensures wrapping on small screens */
   }
 
   /* Responsive */
@@ -183,16 +202,11 @@ const char index_html[] PROGMEM = R"rawliteral(
       height: 80px;
       font-size: 2.5rem;
     }
-    #requestImage {
-      width: 100%;
-      height: 80px;
-      font-size: 1.2rem;
-    }
   }
 </style>
 </head>
 <body>
-<h2>EVA: Dashboard de Telemetría</h2>
+<h2>EVA: Dashboard de Telemetría y Control</h2>
 
 <div class="telemetry-container">
   <!-- Left Column -->
@@ -274,12 +288,23 @@ const char index_html[] PROGMEM = R"rawliteral(
     <button id="btnLeft" class="control-button control-left">←</button>
     <button id="btnRight" class="control-button control-right">→</button>
     <button id="btnDown" class="control-button control-down">↓</button>
+  </div>  
+
+  <div class="controls-box command-button-box">
+    <button id="requestImage" class="command-button" style="background-color: #28a745;">Obtener Imagen</button>
+    <button id="captureImage" class="command-button" style="background-color: #28a745;">Solicitar Imagen</button>
+    <button id="recvTel" class="command-button" style="background-color: #28a7a5;">Recibir Telemetría</button>
+    <button id="stopTel" class="command-button" style="background-color: #28a7a5;">Detener Telemetría</button>
   </div>
 
-  <div class="controls-box image-button-box">
-    <button id="requestImage" class="control-button">Obtener Imagen</button>
+  <div class="controls-box command-button-box">
+    <button id="forceShort" class="command-button">LoRa: <br> <br> Corto Alcance</button>
+    <button id="forceMid" class="command-button">LoRa: <br> <br> Medio Alcance</button>
+    <button id="forceLong" class="command-button">LoRa: <br> <br> Largo Alcance</button>
   </div>
+
 </div>
+
 
 <script>
   // Example: set Base64 image
@@ -289,10 +314,12 @@ const char index_html[] PROGMEM = R"rawliteral(
 <script src="main.js"></script>
 </body>
 </html>
+
 )rawliteral";
 
 // ====== Embedded JS======
 const char main_js[] PROGMEM = R"rawliteral(
+
 document.addEventListener('DOMContentLoaded', () => {
   const ws = new WebSocket('ws://192.168.4.1:81');
 
@@ -316,6 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.length === 24) {
         console.log("Valid telemetry packet (24 values)");
 
+        // --- Update telemetry values ---
         document.getElementById('rssiCurr').textContent = data[0];
         document.getElementById('rssiAvg').textContent = data[1];
         document.getElementById('tempInt').textContent = (data[2] / 100).toFixed(2);
@@ -347,6 +375,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('dist2').textContent = data[22];
         document.getElementById('dist3').textContent = data[23];
 
+        // --- Verify DOM updates ---
         console.log("DOM values check:", {
           rssiCurr: document.getElementById('rssiCurr').textContent,
           tempInt: document.getElementById('tempInt').textContent,
@@ -368,12 +397,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Arrow buttons
   document.getElementById('btnUp').addEventListener('click', () => sendCommand('UP'));
   document.getElementById('btnDown').addEventListener('click', () => sendCommand('DOWN'));
   document.getElementById('btnLeft').addEventListener('click', () => sendCommand('LEFT'));
   document.getElementById('btnRight').addEventListener('click', () => sendCommand('RIGHT'));
+
+  // Image & telemetry buttons
   document.getElementById('requestImage').addEventListener('click', () => sendCommand('WEB_IMG'));
+  document.getElementById('captureImage').addEventListener('click', () => sendCommand('CAPTURE_IMG'));
+  document.getElementById('recvTel').addEventListener('click', () => sendCommand('START_TEL'));
+  document.getElementById('stopTel').addEventListener('click', () => sendCommand('STOP_TEL'));
+
+  // LoRa buttons
+  document.getElementById('forceShort').addEventListener('click', () => sendCommand('LORA_SHORT'));
+  document.getElementById('forceMid').addEventListener('click', () => sendCommand('LORA_MEDIUM'));
+  document.getElementById('forceLong').addEventListener('click', () => sendCommand('LORA_LONG'));
 });
+
 )rawliteral";
 
 // ====== SoftAP settings ======
@@ -475,11 +516,16 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
       }
 
       if(client_num == controllerClient) {
-        if(msg == "UP") Serial.println("W");
-        else if(msg == "DOWN") Serial.println("S");
-        else if(msg == "LEFT") Serial.println("A");
-        else if(msg == "RIGHT") Serial.println("D");
-
+        if(msg == "UP") Serial.println(".W");
+        else if(msg == "DOWN") Serial.println(".S");
+        else if(msg == "LEFT") Serial.println(".A");
+        else if(msg == "RIGHT") Serial.println(".D");
+        else if(msg == "CAPTURE_IMG") Serial.println(".IMAGE");
+        else if(msg == "START_TEL") Serial.println(".START");
+        else if(msg == "STOP_TEL") Serial.println(".STOP");
+        else if(msg == "LORA_SHORT") Serial.println(".FORCESHORT");
+        else if(msg == "LORA_MEDIUM") Serial.println(".FORCEMID");
+        else if(msg == "LORA_LONG") Serial.println(".FORCELONG");
       } else {
         Serial.printf("Client %u tried to send command but is not controller\n", client_num);
       }
