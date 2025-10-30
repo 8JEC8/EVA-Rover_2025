@@ -101,65 +101,68 @@ void setup() {
   pinMode(XSHUT2, OUTPUT);
   pinMode(XSHUT3, OUTPUT);
 
-  Wire.begin(); // I2C sensores de distancia
-
-  // Apagamos todos los sensores de distancia previo a escribir Address
   digitalWrite(XSHUT1, LOW);
   digitalWrite(XSHUT2, LOW);
   digitalWrite(XSHUT3, LOW);
-  delay(20);
+  delay(1000);
+
+  Wire.begin(); // I2C sensores de distancia
+  delay(200);
 
   // Inicializamos sensor 1
   digitalWrite(XSHUT1, HIGH);
-  delay(20);
+  delay(150);
   sensor1.init(true);
   sensor1.setAddress(0x30);   // Dirección temporal para sensor 1
-  sensor1.startContinuous();
 
   // Inicializamos sensor 2
   digitalWrite(XSHUT2, HIGH);
-  delay(20);
+  delay(150);
   sensor2.init(true);
   sensor2.setAddress(0x31);   // Dirección temporal para sensor 2
-  sensor2.startContinuous();
 
   // Inicializamos sensor 3
   digitalWrite(XSHUT3, HIGH);
-  delay(20);
+  delay(150);
   sensor3.init(true);
   sensor3.setAddress(0x32);   // Dirección temporal para sensor 3
-  sensor3.startContinuous();
+  
+  delay(100);
 
+  sensor1.startContinuous();
+  sensor2.startContinuous();
+  sensor3.startContinuous();
+  
   while (!ina219_ESP.begin()) {
     Serial.println("ERROR_INA_ESP32");
-    delay(20);
+    delay(200);
   }
 
   while (!ina219_M1.begin()) {
     Serial.println("ERROR_INA_MOTOR1");
-    delay(20);
+    delay(200);
   }
 
   while (!ina219_M2.begin()) {
     Serial.println("ERROR_INA_MOTOR2");
-    delay(20);
+    delay(200);
   }
 
   // Intento de Conexión: SHT31
   while (!sht31.begin(0x44)) {
     Serial.println("ERROR_SHT31");
-    delay(20);
+    delay(200);
   }
 
   // Intento de Conexión: MPU6050
   while (!mpu.begin()) {
     Serial.println("ERROR_MPU6050");
-    delay(20);
+    delay(200);
   }
 
   while (!aht.begin()) {
     Serial.println("ERROR_AHT10");
-    delay(20);
+    delay(200);
   }
 
   // Configuración MPU6050
@@ -185,7 +188,7 @@ void loop() {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd.equalsIgnoreCase(".START")) {
+    if (cmd.equalsIgnoreCase("GO")) {
       if (sendCSV) {
         Serial.println("CSV_ALREADY_STARTED");
       } else {
@@ -195,7 +198,7 @@ void loop() {
         ledFlashing = ledRainbow = ledDot = false;
       }
     }
-    else if (cmd.equalsIgnoreCase(".STOP")) {
+    else if (cmd.equalsIgnoreCase("STP")) {
       if (!sendCSV) {
         Serial.println("CSV_ALREADY_STOPPED");
       } else {
@@ -204,19 +207,14 @@ void loop() {
         Serial.println("CSV_SENDING_STOPPED");
       }
     }
-    else if (cmd.startsWith(".INTERVAL")) {
-      // Extract numeric part after ".INTERVAL"
-      float newIntervalSec = cmd.substring(9).toFloat(); // handles decimals like 2.5
-      if (newIntervalSec > 0) {
-        intervalSec = newIntervalSec;
-        interval = (unsigned long)(intervalSec * 1000);
-        Serial.println("CSV_INTERVAL_SET_" + String(intervalSec, 2) + "sec");
-      } else {
-        Serial.println("ERROR_INVALID_INTERVAL");
-      }
+    else if (cmd.startsWith("INT")) {
+      float newIntervalSec = cmd.substring(3).toFloat(); // Extraer float para intervalo
+      intervalSec = newIntervalSec;
+      interval = (unsigned long)(intervalSec * 1000);
+      Serial.println("CSV_INTERVAL_SET_" + String(intervalSec, 2) + "sec");
     }
-    else if (cmd.startsWith(".SET")) {
-      int newSteps = cmd.substring(4).toInt();
+    else if (cmd.startsWith("SET")) {
+      int newSteps = cmd.substring(3).toInt();
       if (newSteps > 0) {
         stepsPerRev = newSteps;
         Serial.println("ACT_STEPS_SET_" + String(stepsPerRev));
@@ -224,19 +222,19 @@ void loop() {
         Serial.println("ERROR_INVALID_STEPS");
       }
     } 
-    else if (cmd.equalsIgnoreCase(".W")) {
+    else if (cmd.equalsIgnoreCase("W")) {
       Serial.println("ACT_FORWARD");
       currentCommand = MOTOR_BOTH_CW;
     }
-    else if (cmd.equalsIgnoreCase(".S")) {
+    else if (cmd.equalsIgnoreCase("S")) {
       Serial.println("ACT_BACKWARD");
       currentCommand = MOTOR_BOTH_CCW;
     }
-    else if (cmd.equalsIgnoreCase(".A")) {
+    else if (cmd.equalsIgnoreCase("A")) {
       Serial.println("ACT_LEFT");
       currentCommand = MOTOR_OPPOSITE_A;
     }
-    else if (cmd.equalsIgnoreCase(".D")) {
+    else if (cmd.equalsIgnoreCase("D")) {
       Serial.println("ACT_RIGHT");
       currentCommand = MOTOR_OPPOSITE_D;
     }
@@ -247,7 +245,7 @@ void loop() {
       Serial.println("LED_MODE_FLASH");
     }
 
-    else if (cmd.equalsIgnoreCase(".CAM")) {
+    else if (cmd.equalsIgnoreCase("FCAM")) {
       ledCam = true;
       ledBreathing = ledFlashing = ledRainbow = ledDot = false;
       setColor(0, 0, 50); // Blue steady
