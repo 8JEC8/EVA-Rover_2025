@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 Telemetry Dashboard</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f0f0f0;
+    margin: 0;
+    padding: 20px;
+  }
+
+  h2 {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+
+  /* Main container: 3 columns */
+  .telemetry-container {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .column {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .left-column { flex: 0 1 320px; }
+  .middle-column { flex: 0 1 320px; }
+  .right-column { flex: 1 1 600px; }
+
+  .telemetry-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 15px 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    text-align: left;
+  }
+
+  .telemetry-box h3 {
+    text-align: center;
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #333;
+  }
+
+  .telemetry-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 8px;
+    font-size: 1rem;
+    align-items: center;
+  }
+
+  .telemetry-grid div:nth-child(odd) { text-align: left; color: #333; }
+  .telemetry-grid div:nth-child(even) { text-align: right; font-weight: 600; color: #222; white-space: nowrap; }
+  .telemetry-grid div:nth-child(odd):not(:last-of-type) { border-bottom: 1px solid #eee; }
+
+  .camera-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 15px 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    text-align: center;
+    height: 442px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .camera-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+  }
+
+  /* Controls section */
+  .controls-line {
+    margin: 20px 0;
+    border-top: 4px solid #000;
+  }
+
+  .controls-container {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+
+  .controls-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 10px;
+    display: grid;
+    gap: 1px;
+    justify-items: center;
+    align-items: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  }
+
+  /* Arrow buttons grid */
+  .arrow-buttons {
+    grid-template-areas:
+      ". up ."
+      "left . right"
+      ". down .";
+    width: 400px;
+    height: 400px;
+  }
+
+  .control-button {
+    padding: 20px;
+    font-size: 4rem;
+    border: none;
+    border-radius: 8px;
+    background-color: #007bff;
+    color: white;
+    cursor: pointer;
+    width: 120px;
+    height: 120px;
+  }
+
+  .control-up { grid-area: up; }
+  .control-down { grid-area: down; }
+  .control-left { grid-area: left; }
+  .control-right { grid-area: right; }
+
+  /* Image button box */
+  .image-button-box {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 400px;
+    height: 200px;
+  }
+
+  #requestImage {
+    width: 180px;
+    height: 100px;
+    font-size: 1.5rem;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .telemetry-container {
+      flex-direction: column;
+      align-items: center;
+    }
+    .left-column, .middle-column, .right-column {
+      flex: 1 1 100%;
+      max-width: none;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .controls-container {
+      flex-direction: column;
+      align-items: center;
+    }
+    .arrow-buttons, .image-button-box {
+      width: 90%;
+      height: auto;
+    }
+    .control-button {
+      width: 80px;
+      height: 80px;
+      font-size: 2.5rem;
+    }
+    #requestImage {
+      width: 100%;
+      height: 80px;
+      font-size: 1.2rem;
+    }
+  }
+</style>
+</head>
+<body>
+<h2>EVA: Dashboard de Telemetría y Control</h2>
+
+<div class="telemetry-container">
+  <!-- Left Column -->
+  <div class="column left-column">
+    <div class="telemetry-box">
+      <h3>Intensidad de Señal</h3>
+      <div class="telemetry-grid">
+        <div>RSSI Actual:</div><div id="rssiCurr">-- [dBm]</div>
+        <div>RSSI Promediado:</div><div id="rssiAvg">-- [dBm]</div>
+      </div>
+    </div>
+
+    <div class="telemetry-box">
+      <h3>Sensores de Distancia</h3>
+      <div class="telemetry-grid">
+        <div>Distancia 1:</div><div id="dist1">-- [mm]</div>
+        <div>Distancia 2:</div><div id="dist2">-- [mm]</div>
+        <div>Distancia 3:</div><div id="dist3">-- [mm]</div>
+      </div>
+    </div>
+
+    <div class="telemetry-box">
+      <h3>Accel & Gyro</h3>
+      <div class="telemetry-grid">
+        <div>Accel X:</div><div id="accX">-- [g]</div>
+        <div>Accel Y:</div><div id="accY">-- [g]</div>
+        <div>Accel Z:</div><div id="accZ">-- [g]</div>
+        <div>ΔÁngulo X:</div><div id="angX">-- [°/s]</div>
+        <div>ΔÁngulo Y:</div><div id="angY">-- [°/s]</div>
+        <div>ΔÁngulo Z:</div><div id="angZ">-- [°/s]</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Middle Column -->
+  <div class="column middle-column">
+    <div class="telemetry-box">
+      <h3>Temperatura y Humedad</h3>
+      <div class="telemetry-grid">
+        <div>Temp. Interna:</div><div id="tempInt">-- [°C]</div>
+        <div>Hum. Interna:</div><div id="humInt">-- [%]</div>
+        <div>Temp. Externa:</div><div id="tempExt">-- [°C]</div>
+        <div>Hum. Externa:</div><div id="humExt">-- [%]</div>
+      </div>
+    </div>
+
+    <div class="telemetry-box">
+      <h3>Lecturas de Alimentación</h3>
+      <div class="telemetry-grid">
+        <div>ESP+CAM Voltaje:</div><div id="voltEsp">-- [V]</div>
+        <div>ESP+CAM Corriente:</div><div id="currEsp">-- [mA]</div>
+        <div>ESP+CAM Potencia:</div><div id="powEsp">-- [mW]</div>
+        <div>Motor 1 Voltaje:</div><div id="voltM1">-- [V]</div>
+        <div>Motor 1 Corriente:</div><div id="currM1">-- [mA]</div>
+        <div>Motor 1 Potencia:</div><div id="powM1">-- [mW]</div>
+        <div>Motor 2 Voltaje:</div><div id="voltM2">-- [V]</div>
+        <div>Motor 2 Corriente:</div><div id="currM2">-- [mA]</div>
+        <div>Motor 2 Potencia:</div><div id="powM2">-- [mW]</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Column -->
+  <div class="column right-column">
+    <div class="camera-box">
+      <h3>Última Imagen Guardada</h3>
+      <img id="camImage" src="" alt="ESPCAM">
+    </div>
+  </div>
+</div>
+
+<!-- Line separator -->
+<div class="controls-line"></div>
+
+<!-- Controls -->
+<div class="controls-container">
+  <div class="controls-box arrow-buttons">
+    <button id="btnUp" class="control-button control-up">↑</button>
+    <button id="btnLeft" class="control-button control-left">←</button>
+    <button id="btnRight" class="control-button control-right">→</button>
+    <button id="btnDown" class="control-button control-down">↓</button>
+  </div>
+
+  <div class="controls-box image-button-box">
+    <button id="requestImage" class="control-button">Obtener Imagen</button>
+  </div>
+</div>
+
+<script>
+  // Example: set Base64 image
+  const base64String = "";
+  document.getElementById('camImage').src = "data:image/jpeg;base64," + base64String;
+</script>
+<script src="main.js"></script>
+</body>
+</html>
