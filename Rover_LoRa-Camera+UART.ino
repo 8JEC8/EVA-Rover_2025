@@ -38,6 +38,7 @@
 // Globals
 std::vector<String> imageChunks;
 int totalChunks = 0;
+int chunkSize = 128;
 
 bool receivingTel = false;   // Already exists
 bool wasReceivingTel = false; // NEW flag to remember previous state
@@ -100,10 +101,7 @@ void captureAndStoreImage() {
   esp_camera_fb_return(fb);
 
   int totalLen = encoded.length();
-  int chunkSize = 128;
   totalChunks = (totalLen + chunkSize - 1) / chunkSize;
-
-  Serial.printf("IMG_STORED_%d_BytesB64_%d_CHUNKS\n", totalLen, totalChunks);
 
   for (int i = 0; i < totalChunks; i++) {
     int start = i * chunkSize;
@@ -113,75 +111,8 @@ void captureAndStoreImage() {
 
   // Inform receiver
   LoRa.beginPacket();
-  LoRa.print("IMG_READY," + String(totalChunks));
+  LoRa.print("IMG_SIZE," + String(totalChunks));
   LoRa.endPacket();
-}
-
-// --- Handle incoming commands ---
-void handleRequest(String cmd) {
-  if (cmd == ".START") {
-    receivingTel = true;
-  }
-
-  if (cmd == ".STOP") {
-    receivingTel = false;
-  }
-
-  if (cmd == ".SHORT") {
-    LoRa.setSpreadingFactor(7);
-    LoRa.setSignalBandwidth(250E3);
-    LoRa.setCodingRate4(5);
-    LoRa.setPreambleLength(6);
-    Serial.println(".INTERVAL1.0");
-  }
-
-  if (cmd == ".MID") {
-    LoRa.setSpreadingFactor(9);
-    LoRa.setSignalBandwidth(125E3);
-    LoRa.setCodingRate4(6);
-    LoRa.setPreambleLength(8);
-    Serial.println(".INTERVAL2.0");
-  }
-
-  if (cmd == ".LONG") {
-    LoRa.setSpreadingFactor(11);
-    LoRa.setSignalBandwidth(125E3);
-    LoRa.setCodingRate4(8);
-    LoRa.setPreambleLength(10);
-    Serial.println(".INTERVAL8.0");
-  }
-
-  if (cmd == ".IMAGE") {
-    wasReceivingTel = receivingTel;
-
-    // Stop telemetry and capture image
-    Serial.println(".STOP");
-    receivingTel = false;
-    Serial.println(".CAM");
-    captureAndStoreImage();
-    return;
-  }
-
-  if (cmd.startsWith("REQ_")) {
-    int reqNum = cmd.substring(4).toInt();
-    if (reqNum >= 1 && reqNum <= totalChunks) {
-      String packet = "C_" + imageChunks[reqNum - 1];
-      LoRa.beginPacket();
-      LoRa.print(packet);
-      LoRa.endPacket();
-
-      if (reqNum == totalChunks && wasReceivingTel) {
-        Serial.println(".START");
-        receivingTel = true;
-      }
-    } else {
-      // Invalid chunk number
-    }
-    return;
-  }
-
-  // fallback: just print
-  Serial.println(cmd);
 }
 
 void setup() {
@@ -198,14 +129,13 @@ void setup() {
   }
 
   LoRa.setTxPower(20);
-  LoRa.setSpreadingFactor(9);
-  LoRa.setSignalBandwidth(125E3);
-  LoRa.setCodingRate4(6);
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSignalBandwidth(250E3);
+  LoRa.setCodingRate4(5);
   LoRa.setSyncWord(0x88);
-  LoRa.setPreambleLength(8);
+  LoRa.setPreambleLength(6);
   LoRa.enableCrc();
 
-  // Camera
   initCamera();
 }
 
@@ -219,19 +149,19 @@ void loop() {
     }
     received.trim();
 
-    // Acknowledge
+    // Ack
     LoRa.beginPacket();
     LoRa.print("ACK_" + received);
     LoRa.endPacket();
 
-    if (received == ".SHORT" || received == ".MID" || received == ".LONG") {
-      delay(20);  // 20 ms pause to ensure ACK finishes
+    if (received == "SRA" || received == "MRA" || received == "LRA") {
+      delay(100);  // 100 para acabar ACK
     }
 
     handleRequest(received);
   }
 
-  // Serial passthrough to LoRa
+  // Rover (RECV Serial) a Estación (SENT LoRa)
   while (Serial.available()) {
     String staResponse = Serial.readStringUntil('\n');
     staResponse.trim();
@@ -241,4 +171,79 @@ void loop() {
       LoRa.endPacket();
     }
   }
+}
+
+void handleRequest(String cmd) {
+  if (cmd == "GO") {
+    receivingTel = true;
+  }
+
+  if (cmd == "STP") {
+    receivingTel = false;
+  }
+
+  if (cmd.startsWith("CK")) {
+      String numStr = cmd.substring(2);
+      int newSize = numStr.toInt();
+      chunkSize = newSize;
+      LoRa.beginPacket();
+      LoRa.print("SET_CHUNKS_" + String(chunkSize));
+      LoRa.endPacket();
+  }
+
+  if (cmd == "SRA") {
+    LoRa.setSpreadingFactor(7);
+    LoRa.setSignalBandwidth(250E3);
+    LoRa.setCodingRate4(5);
+    LoRa.setPreambleLength(6);
+    Serial.println("INT1.0");
+  }
+
+  if (cmd == "MRA") {
+    LoRa.setSpreadingFactor(9);
+    LoRa.setSignalBandwidth(125E3);
+    LoRa.setCodingRate4(6);
+    LoRa.setPreambleLength(8);
+    Serial.println("INT2.0");
+  }
+
+  if (cmd == "LRA") {
+    LoRa.setSpreadingFactor(11);
+    LoRa.setSignalBandwidth(125E3);
+    LoRa.setCodingRate4(8);
+    LoRa.setPreambleLength(10);
+    Serial.println("INT8.0");
+  }
+
+  if (cmd == "IMG") {
+    wasReceivingTel = receivingTel;
+
+    // Detener TEL y capturar Imagen + Flash LED
+    Serial.println("STP");
+    receivingTel = false;
+    Serial.println("FCAM");
+    captureAndStoreImage();
+    return;
+  }
+
+  if (cmd.startsWith("REQ_")) {
+    int reqNum = cmd.substring(4).toInt();
+    if (reqNum >= 1 && reqNum <= totalChunks) {
+      String packet = "C_" + imageChunks[reqNum - 1];
+      LoRa.beginPacket();
+      LoRa.print(packet);
+      LoRa.endPacket();
+
+      if (reqNum == totalChunks && wasReceivingTel) {
+        Serial.println("GO");
+        receivingTel = true;
+      }
+    } else {
+      // Número de Chunk no válido
+    }
+    return;
+  }
+
+  // FWD LoRa a Rover a través de Serial
+  Serial.println(cmd);
 }

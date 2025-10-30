@@ -37,6 +37,21 @@ Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 int stepsPerRev = 6400;    // 1 revolución por defecto, cambiar con .STEP###
 #define STEP_DELAY_US 63   // Velocidad
 
+bool ledBreathing = false;
+bool ledFlashing = false;
+bool ledRainbow = false;
+bool ledDot = false;
+bool ledIdle = true;
+bool ledCam = false; 
+
+unsigned long previousMillis = 0;
+float intervalSec = 2.5;                      // interval in seconds (default)
+unsigned long interval = intervalSec * 1000;  // converted to ms
+bool sendCSV = false;                         // Flag to control CSV sending
+
+#define CSV_BUFFER_SIZE 96
+char csvBuffer[CSV_BUFFER_SIZE];
+
 enum MotorCommand {
   MOTOR_IDLE,
   MOTOR_BOTH_CW,
@@ -72,69 +87,82 @@ void setup() {
     1                // core 1
   );
 
+  xTaskCreatePinnedToCore(
+    ledTask,        // Task function
+    "LED Task",     // Name
+    2048,           // Stack size
+    NULL,           // Parameter
+    1,              // Priority
+    NULL,           // Task handle
+    1               // Run on core 1
+  );
+
   pinMode(XSHUT1, OUTPUT);
   pinMode(XSHUT2, OUTPUT);
   pinMode(XSHUT3, OUTPUT);
 
-  Wire.begin(); // I2C sensores de distancia
-
-  // Apagamos todos los sensores de distancia previo a escribir Address
   digitalWrite(XSHUT1, LOW);
   digitalWrite(XSHUT2, LOW);
   digitalWrite(XSHUT3, LOW);
-  delay(20);
+  delay(1000);
+
+  Wire.begin(); // I2C sensores de distancia
+  delay(200);
 
   // Inicializamos sensor 1
   digitalWrite(XSHUT1, HIGH);
-  delay(20);
+  delay(150);
   sensor1.init(true);
   sensor1.setAddress(0x30);   // Dirección temporal para sensor 1
-  sensor1.startContinuous();
 
   // Inicializamos sensor 2
   digitalWrite(XSHUT2, HIGH);
-  delay(20);
+  delay(150);
   sensor2.init(true);
   sensor2.setAddress(0x31);   // Dirección temporal para sensor 2
-  sensor2.startContinuous();
 
   // Inicializamos sensor 3
   digitalWrite(XSHUT3, HIGH);
-  delay(20);
+  delay(150);
   sensor3.init(true);
   sensor3.setAddress(0x32);   // Dirección temporal para sensor 3
-  sensor3.startContinuous();
+  
+  delay(100);
 
+  sensor1.startContinuous();
+  sensor2.startContinuous();
+  sensor3.startContinuous();
+  
   while (!ina219_ESP.begin()) {
     Serial.println("ERROR_INA_ESP32");
-    delay(20);
+    delay(200);
   }
 
   while (!ina219_M1.begin()) {
     Serial.println("ERROR_INA_MOTOR1");
-    delay(20);
+    delay(200);
   }
 
   while (!ina219_M2.begin()) {
     Serial.println("ERROR_INA_MOTOR2");
-    delay(20);
+    delay(200);
   }
 
   // Intento de Conexión: SHT31
   while (!sht31.begin(0x44)) {
     Serial.println("ERROR_SHT31");
-    delay(20);
+    delay(200);
   }
 
   // Intento de Conexión: MPU6050
   while (!mpu.begin()) {
     Serial.println("ERROR_MPU6050");
-    delay(20);
+    delay(200);
   }
 
   while (!aht.begin()) {
     Serial.println("ERROR_AHT10");
-    delay(20);
+    delay(200);
   }
 
   // Configuración MPU6050
@@ -143,10 +171,7 @@ void setup() {
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 }
 
-unsigned long previousMillis = 0;
-float intervalSec = 2.5;                      // interval in seconds (default)
-unsigned long interval = intervalSec * 1000;  // converted to ms
-bool sendCSV = false;                         // Flag to control CSV sending
+
 
 void loop() {
   unsigned long currentMillis = millis();
@@ -154,8 +179,8 @@ void loop() {
   // 1. Send CSV every "interval" seconds (non-blocking) only if enabled
   if (sendCSV && currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
-    String allCSV = getAllSensorsCSV();
-    Serial.println(allCSV); // Send CSV over LoRa
+    getAllSensorsCSV();
+    Serial.println(csvBuffer); // Send CSV over LoRa
   }
 
   // 2. Handle only motor commands and CSV control
@@ -163,35 +188,33 @@ void loop() {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd.equalsIgnoreCase(".START")) {
+    if (cmd.equalsIgnoreCase("GO")) {
       if (sendCSV) {
         Serial.println("CSV_ALREADY_STARTED");
       } else {
         sendCSV = true;
         Serial.println("CSV_SENDING_STARTED");
+        ledBreathing = true;
+        ledFlashing = ledRainbow = ledDot = false;
       }
     }
-    else if (cmd.equalsIgnoreCase(".STOP")) {
+    else if (cmd.equalsIgnoreCase("STP")) {
       if (!sendCSV) {
         Serial.println("CSV_ALREADY_STOPPED");
       } else {
         sendCSV = false;
+        ledBreathing = false;
         Serial.println("CSV_SENDING_STOPPED");
       }
     }
-    else if (cmd.startsWith(".INTERVAL")) {
-      // Extract numeric part after ".INTERVAL"
-      float newIntervalSec = cmd.substring(9).toFloat(); // handles decimals like 2.5
-      if (newIntervalSec > 0) {
-        intervalSec = newIntervalSec;
-        interval = (unsigned long)(intervalSec * 1000);
-        Serial.println("CSV_INTERVAL_SET_" + String(intervalSec, 2) + "sec");
-      } else {
-        Serial.println("ERROR_INVALID_INTERVAL");
-      }
+    else if (cmd.startsWith("INT")) {
+      float newIntervalSec = cmd.substring(3).toFloat(); // Extraer float para intervalo
+      intervalSec = newIntervalSec;
+      interval = (unsigned long)(intervalSec * 1000);
+      Serial.println("CSV_INTERVAL_SET_" + String(intervalSec, 2) + "sec");
     }
-    else if (cmd.startsWith(".SET")) {
-      int newSteps = cmd.substring(4).toInt();
+    else if (cmd.startsWith("SET")) {
+      int newSteps = cmd.substring(3).toInt();
       if (newSteps > 0) {
         stepsPerRev = newSteps;
         Serial.println("ACT_STEPS_SET_" + String(stepsPerRev));
@@ -199,57 +222,118 @@ void loop() {
         Serial.println("ERROR_INVALID_STEPS");
       }
     } 
-    else if (cmd.equalsIgnoreCase(".W")) {
+    else if (cmd.equalsIgnoreCase("W")) {
       Serial.println("ACT_FORWARD");
       currentCommand = MOTOR_BOTH_CW;
     }
-    else if (cmd.equalsIgnoreCase(".S")) {
+    else if (cmd.equalsIgnoreCase("S")) {
       Serial.println("ACT_BACKWARD");
       currentCommand = MOTOR_BOTH_CCW;
     }
-    else if (cmd.equalsIgnoreCase(".A")) {
+    else if (cmd.equalsIgnoreCase("A")) {
       Serial.println("ACT_LEFT");
       currentCommand = MOTOR_OPPOSITE_A;
     }
-    else if (cmd.equalsIgnoreCase(".D")) {
+    else if (cmd.equalsIgnoreCase("D")) {
       Serial.println("ACT_RIGHT");
       currentCommand = MOTOR_OPPOSITE_D;
     }
 
-    else if (cmd.equalsIgnoreCase(".RED")) {
-      setColor(50, 0, 0);
+    else if (cmd.equalsIgnoreCase(".FLASH")) {
+      ledFlashing = true;
+      ledBreathing = ledRainbow = ledDot = ledCam = false;
+      Serial.println("LED_MODE_FLASH");
     }
-    else if (cmd.equalsIgnoreCase(".BLUE")) {
-      setColor(0, 0, 50);
+
+    else if (cmd.equalsIgnoreCase("FCAM")) {
+      ledCam = true;
+      ledBreathing = ledFlashing = ledRainbow = ledDot = false;
+      setColor(0, 0, 50); // Blue steady
     }
-    else if (cmd.equalsIgnoreCase(".GREEN")) {
-      setColor(0, 50, 0);
-    }
-    else if (cmd.equalsIgnoreCase(".CYAN")) {
-      setColor(0, 50, 50);
-    }
-    else if (cmd.equalsIgnoreCase(".MAGENTA")) {
-      setColor(50, 0, 50);
-    }
-    else if (cmd.equalsIgnoreCase(".YELLOW")) {
-      setColor(50, 50, 0);
-    }
-    else if (cmd.equalsIgnoreCase(".WHITE")) {
-      setColor(50, 50, 50);
-    }
-    else if (cmd.equalsIgnoreCase(".ORANGE")) {
-      setColor(50, 25, 0);
-    }
-    else if (cmd.equalsIgnoreCase(".PURPLE")) {
-      setColor(25, 0, 50);
-    }
-    else if (cmd.equalsIgnoreCase(".OFF")) {
-      setColor(0, 0, 0);
+
+    else if (cmd.equalsIgnoreCase(".RAINBOW")) {
+      ledRainbow = true;
+      ledBreathing = ledFlashing =  ledDot = ledCam = false;
+      Serial.println("LED_MODE_RAINBOW");
     }
     // Ignorar mensajes ajenos
   }
 }
 
+String getAllSensorsCSV() {
+  // Leer sensores: SHT , AHT , ESP , M1 , M2 , MPU , DIST
+  float sht_temp = sht31.readTemperature();
+  float sht_hum  = sht31.readHumidity();
+
+  sensors_event_t aht_humidity, aht_temp;
+  aht.getEvent(&aht_humidity, &aht_temp);
+
+  float int_temp = aht_temp.temperature;
+  float int_hum  = aht_humidity.relative_humidity;
+
+  // V,I,P
+  float espBusV = ina219_ESP.getBusVoltage_V();
+  float espCurrent = ina219_ESP.getCurrent_mA();
+  float espPower = ina219_ESP.getPower_mW();
+
+  float m1BusV = ina219_M1.getBusVoltage_V();
+  float m1Current = ina219_M1.getCurrent_mA();
+  float m1Power = ina219_M1.getPower_mW();
+
+  float m2BusV = ina219_M2.getBusVoltage_V();
+  float m2Current = ina219_M2.getCurrent_mA();
+  float m2Power = ina219_M2.getPower_mW();
+
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  int dist1 = sensor1.readRangeContinuousMillimeters();
+  int dist2 = sensor2.readRangeContinuousMillimeters();
+  int dist3 = sensor3.readRangeContinuousMillimeters();
+
+  // Escalar valores, 2 decimales excepto Is
+  int16_t sht_temp_i = sht_temp * 100;
+  int16_t sht_hum_i  = sht_hum  * 100;
+  int16_t int_temp_i = int_temp * 100;
+  int16_t int_hum_i  = int_hum  * 100;
+
+  int16_t espBusV_i = espBusV * 100;
+  int16_t espCurrent_i = espCurrent * 10; // 0.1mA, no overflow
+  int16_t espPower_i = espPower;          // mW
+
+  int16_t m1BusV_i = m1BusV * 100;
+  int16_t m1Current_i = m1Current * 10;
+  int16_t m1Power_i = m1Power;
+
+  int16_t m2BusV_i = m2BusV * 100;
+  int16_t m2Current_i = m2Current * 10;
+  int16_t m2Power_i = m2Power;
+
+  int16_t accX_i = a.acceleration.x * 100;
+  int16_t accY_i = a.acceleration.y * 100;
+  int16_t accZ_i = a.acceleration.z * 100;
+  int16_t gyroX_i = g.gyro.x * 100;
+  int16_t gyroY_i = g.gyro.y * 100;
+  int16_t gyroZ_i = g.gyro.z * 100;
+
+  // CSV
+  snprintf(csvBuffer, CSV_BUFFER_SIZE,
+    "%d,%d,%d,%d,"      // SHT, AHT
+    "%d,%d,%d,"         // ESP
+    "%d,%d,%d,"         // M1
+    "%d,%d,%d,"         // M2
+    "%d,%d,%d,%d,%d,%d,"// Acc + Gyro
+    "%d,%d,%d",         // Dist
+    sht_temp_i, sht_hum_i, int_temp_i, int_hum_i,
+    espBusV_i, espCurrent_i, espPower_i,
+    m1BusV_i, m1Current_i, m1Power_i,
+    m2BusV_i, m2Current_i, m2Power_i,
+    accX_i, accY_i, accZ_i, gyroX_i, gyroY_i, gyroZ_i,
+    dist1, dist2, dist3
+  );
+
+  return String(csvBuffer);
+}
 
 void setColor(uint8_t red, uint8_t green, uint8_t blue) {
   uint32_t color = strip.Color(red, green, blue);
@@ -259,90 +343,12 @@ void setColor(uint8_t red, uint8_t green, uint8_t blue) {
   strip.show();
 }
 
-String getAllSensorsCSV() {
-  String csv = "";
-
-  // 1. Temperatura Ambiente
-  String sht_Msg;
-  getAmbTemp(sht_Msg);
-  csv += sht_Msg;
-
-  // 2. Temperatura Interna
-  String aht_Msg;
-  getIntTemp(aht_Msg);
-  csv += "," + aht_Msg;
-
-  // 3. Potencia: ESP, Motores 1 y 2
-  String powerMsg;
-  getPower(ina219_ESP, 1, powerMsg);
-  csv += "," + powerMsg;
-  getPower(ina219_M1, 2, powerMsg);
-  csv += "," + powerMsg;
-  getPower(ina219_M2, 3, powerMsg);
-  csv += "," + powerMsg;
-
-  // 4. Giroscopio
-  String gyroMsg;
-  getGyro(gyroMsg);
-  csv += "," + gyroMsg;
-
-  // 5. Sensores de Distancia
-  String distMsg;
-  getDist(sensor1, 1, distMsg);
-  csv += "," + distMsg;
-  getDist(sensor2, 2, distMsg);
-  csv += "," + distMsg;
-  getDist(sensor3, 3, distMsg);
-  csv += "," + distMsg;
-
-  return csv;
-}
-
-void getAmbTemp(String &sht_Msg) {
-  float sht_temp = sht31.readTemperature();
-  float sht_hum  = sht31.readHumidity();
-
-  sht_Msg = String(sht_temp, 2) + "," + String(sht_hum, 2);
-}
-
-void getIntTemp(String &aht_Msg) {
-  sensors_event_t aht_humidity, aht_temp;
-  aht.getEvent(&aht_humidity, &aht_temp);
-
-  aht_Msg = String(aht_temp.temperature, 2) + "," +
-            String(aht_humidity.relative_humidity, 2);
-}
-
-void getPower(Adafruit_INA219 &ina, int powerNum, String &powerMsg) {
-    float busVoltage = ina.getBusVoltage_V();
-    float current_mA = ina.getCurrent_mA();
-    float power_mW   = ina.getPower_mW();
-
-    powerMsg = String(busVoltage, 2) + "," +
-               String(current_mA, 2)  + "," +
-               String(power_mW, 2);
-}
-
-void getGyro(String &gyroMsg) {
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
-
-  gyroMsg = String(a.acceleration.x, 2) + "," +
-            String(a.acceleration.y, 2) + "," +
-            String(a.acceleration.z, 2) + "," +
-            String(g.gyro.x, 2) + "," +
-            String(g.gyro.y, 2) + "," +
-            String(g.gyro.z, 2);
-}
-
-void getDist(VL53L0X &sensor, int distNum, String &distMsg) {
-  distMsg = String(sensor.readRangeContinuousMillimeters());
-}
-
 void motorTask(void * parameter) {
   while (true) {
     if (currentCommand != MOTOR_IDLE) {
       digitalWrite(SLEEP_PIN, HIGH);
+      ledDot = true;
+      ledBreathing = ledFlashing = ledRainbow = ledCam = false;
 
       int dir1 = LOW, dir2 = LOW;
       switch (currentCommand) {
@@ -365,10 +371,94 @@ void motorTask(void * parameter) {
       }
 
       digitalWrite(SLEEP_PIN, LOW);
+      ledDot = false;
+
+      if (sendCSV) {
+        ledBreathing = true;
+        ledFlashing = ledRainbow = ledDot = ledCam = false;
+      }
 
       currentCommand = MOTOR_IDLE;
     }
 
     vTaskDelay(1);
+  }
+}
+
+void ledTask(void *parameter) {
+  unsigned long previousMillis = 0;
+  int brightness = 0;
+  int fadeAmount = 5;
+  static int dotIndex = 0;
+  static int dotDirection = 1;
+  static uint16_t rainbowOffset = 0;
+
+  while (true) {
+    if (ledBreathing) {
+      // Slow breathing purple
+      float level = (sin(millis() / 500.0) + 1.0) / 2.0; // 0–1 sine wave
+      setColor(0, 10 * level, 0);
+      vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+
+    else if (ledFlashing) {
+      // Flashing yellow
+      static bool state = false;
+      state = !state;
+      if (state) setColor(20, 20, 0);
+      else setColor(0, 0, 0);
+      vTaskDelay(300 / portTICK_PERIOD_MS);
+    }
+
+    else if (ledRainbow) {
+      strip.setBrightness(50);
+      
+      for (int i = 0; i < LED_COUNT; i++) {
+        int pixelHue = (i * 65536L / LED_COUNT) + rainbowOffset;
+        strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
+      }
+      strip.show();
+      rainbowOffset += 256; // controls rainbow speed
+      vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+
+    else if (ledDot) {
+      strip.clear();
+
+      // Light the current LED and the next one (no wraparound)
+      strip.setPixelColor(dotIndex, strip.Color(0, 0, 15));      // main blue
+      strip.setPixelColor(dotIndex + 1, strip.Color(0, 0, 15));  // next LED
+      strip.setPixelColor(dotIndex + 2, strip.Color(0, 0, 15));  // next LED
+
+      strip.show();
+
+      dotIndex += dotDirection;
+
+      // Reverse direction when the leading LED reaches the end
+      if (dotIndex >= LED_COUNT - 2 || dotIndex <= 0) {
+        dotDirection = -dotDirection;
+      }
+
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+
+    else if (ledCam) {
+      setColor(25, 25, 25);
+      strip.show();
+      vTaskDelay(500 / portTICK_PERIOD_MS);
+      ledCam = false;
+    }
+
+    else if (!ledBreathing && !ledFlashing && !ledRainbow && !ledDot && !ledCam) {
+      float level = (sin(millis() / 500.0) + 1.0) / 2.0;
+      setColor(0, 2 * level, 2 * level); // soft cyan
+      vTaskDelay(30 / portTICK_PERIOD_MS);
+    }
+
+    else {
+      // All off
+      setColor(0, 0, 0);
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
   }
 }
