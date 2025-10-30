@@ -75,10 +75,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Button event listeners
+  // Arrow buttons
   document.getElementById('btnUp').addEventListener('click', () => sendCommand('UP'));
   document.getElementById('btnDown').addEventListener('click', () => sendCommand('DOWN'));
   document.getElementById('btnLeft').addEventListener('click', () => sendCommand('LEFT'));
   document.getElementById('btnRight').addEventListener('click', () => sendCommand('RIGHT'));
+
+  // Image & telemetry buttons
   document.getElementById('requestImage').addEventListener('click', () => sendCommand('WEB_IMG'));
+  document.getElementById('captureImage').addEventListener('click', () => sendCommand('CAPTURE_IMG'));
+  document.getElementById('recvTel').addEventListener('click', () => sendCommand('START_TEL'));
+  document.getElementById('stopTel').addEventListener('click', () => sendCommand('STOP_TEL'));
+
+  // LoRa buttons
+  document.getElementById('forceShort').addEventListener('click', () => sendCommand('LORA_SHORT'));
+  document.getElementById('forceMid').addEventListener('click', () => sendCommand('LORA_MEDIUM'));
+  document.getElementById('forceLong').addEventListener('click', () => sendCommand('LORA_LONG'));
 });
