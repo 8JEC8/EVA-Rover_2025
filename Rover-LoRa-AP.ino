@@ -1,12 +1,24 @@
 #include <SPI.h>
 #include <LoRa.h>
 #include <DFRobotDFPlayerMini.h>
+#include <WiFi.h>
+#include <WebSocketsServer.h>
+#include <WebServer.h> 
 #define LORA_FREQ 433E6
 #define LORA_SS   5    // CS
 #define LORA_DIO0 25   // DIO0
 
 HardwareSerial dfSerial(2);
 DFRobotDFPlayerMini myDFPlayer;
+
+const char* apSSID = "EVA_Dashboard";
+const char* apPassword = "12345678";  // min 8 chars
+
+WebServer server(80);
+WebSocketsServer webSocket = WebSocketsServer(81);
+
+// Only first client can control
+uint8_t controllerClient = 255; // 255 = no controller yet
 
 struct Track {
   int folder;
@@ -73,6 +85,28 @@ void setup() {
     while (true);
   }
 
+  // Start AP
+  WiFi.softAP(apSSID, apPassword);
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("Conectar a Dashboard: ");
+  Serial.println(IP);
+
+  // Serve HTML
+  server.on("/", HTTP_GET, []() {
+    server.send_P(200, "text/html", index_html);
+  });
+
+  // ====== Serve JS file ======
+  server.on("/main.js", HTTP_GET, []() {
+    server.send_P(200, "application/javascript", main_js);
+  });
+
+  server.begin();
+
+  // ====== WebSocket server ======
+  webSocket.begin();
+  webSocket.onEvent(onWebSocketEvent);
+
   myDFPlayer.volume(23);
   randomSeed(analogRead(0));
 
@@ -101,6 +135,9 @@ void setup() {
 
 void loop() {
   unsigned long now = millis();
+
+  webSocket.loop();
+  server.handleClient();
 
   if (now - lastPunTime >= punInterval) {
     lastPunTime = now;
@@ -159,6 +196,7 @@ void loop() {
             if (avgRssi < shortToMid) {
                 Serial.println("AUTOSWITCH_MID");
                 queueMessage("MRA");
+                queueTrack(2, 12);
             }
             break;
 
@@ -166,9 +204,11 @@ void loop() {
             if (avgRssi > midToShort) {
                 Serial.println("AUTOSWITCH_SHORT");
                 queueMessage("SRA");
+                queueTrack(2, 10);
             } else if (avgRssi < midToLong) {
                 Serial.println("AUTOSWITCH_LONG");
                 queueMessage("LRA");
+                queueTrack(2, 11);
             }
             break;
 
@@ -176,6 +216,7 @@ void loop() {
             if (avgRssi > longToMid) {
                 Serial.println("AUTOSWITCH_MID");
                 queueMessage("MRA");
+                queueTrack(2, 12);
             }
             break;
     }
@@ -198,6 +239,13 @@ void loop() {
       msgStartTime = now;
       lastChunkRequestTime = now;
     }
+
+    else if (received.indexOf(',') != -1) {
+      String webTelemetry = String(rssi) + "," + String(avgRssi) + "," + received;
+      Serial.println("  RECV_ROVER_" + webTelemetry);
+      webSocket.broadcastTXT(webTelemetry);
+    }
+
 
     // Handle chunk data
     else if (received.startsWith("C_")) {
@@ -237,7 +285,7 @@ void loop() {
             Serial.println(imgBuffer);
             Serial.println("B64_IMAGE_END");
             myDFPlayer.playFolder(2, 9);
-            imgBuffer = "";
+            // imgBuffer = "";
           }
         } else {
           Serial.printf("CHUNK_%d_INVALID(len=%d,b64=%s)_REREQ\n",
@@ -386,7 +434,6 @@ void LoRaShort() {
   ackTimeout = 3000;
   chunkTimeout = 2000;
   currentRange = SHORT;
-  queueTrack(2, 10);
 }
 
 void LoRaMid() {
@@ -399,7 +446,6 @@ void LoRaMid() {
   ackTimeout = 5000;
   chunkTimeout = 3000;
   currentRange = MID;
-  queueTrack(2, 12);
 }
 
 void LoRaLong() {
@@ -412,7 +458,6 @@ void LoRaLong() {
   ackTimeout = 8000;
   chunkTimeout = 5000;
   currentRange = LONG;
-  queueTrack(2, 11);
 }
 
 void queueTrack(int folder, int track) {
@@ -445,6 +490,49 @@ void printCommandList() {
   Serial.println("    '.SHOW'         : Muestra la ruta calculada");
   Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
   Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
+}
+
+void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length) {
+  switch(type) {
+    case WStype_CONNECTED: {
+      Serial.printf("CLIENT_%u_CONN\n", client_num);
+      // Assign first controller if none
+      if(controllerClient == 255) controllerClient = client_num;
+      break;
+    }
+    case WStype_DISCONNECTED: {
+      Serial.printf("CLIENT_%u_DC\n", client_num);
+      if(client_num == controllerClient) controllerClient = 255;
+      break;
+    }
+    case WStype_TEXT: {
+      String msg = String((char*)payload);
+      msg.trim();
+
+      if(msg == "WEB_IMG") {
+        webSocket.sendTXT(client_num, "IMG_" + imgBuffer); // send current image only to the requester
+        return; // skip the controller check
+      }
+
+      if(client_num == controllerClient) {
+        if(msg == "UP") queueMessage("W");
+        else if(msg == "DOWN") queueMessage("S");
+        else if(msg == "LEFT") queueMessage("A");
+        else if(msg == "RIGHT") queueMessage("D");
+        else if(msg == "CAPTURE_IMG") queueMessage("IMG");
+        else if(msg == "START_TEL") queueMessage("GO");
+        else if(msg == "STOP_TEL") queueMessage("STP");
+        else if(msg == "LORA_SHORT") queueMessage("SRA");
+        else if(msg == "LORA_MEDIUM") queueMessage("MRA");
+        else if(msg == "LORA_LONG") queueMessage("LRA");
+      } else {
+        Serial.printf("CLIENT_%u_ATTEMPT_NOTCONTROLLER\n", client_num);
+      }
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 void handleAckSound(const String &ackFor) {
