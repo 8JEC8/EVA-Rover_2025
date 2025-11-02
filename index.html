@@ -5,17 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ESP32 Telemetry Dashboard</title>
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    background: #f0f0f0;
-    margin: 0;
-    padding: 20px;
-  }
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: linear-gradient(135deg, #27bff1, #10f865);
+  margin: 0;
+  padding: 20px;
+  color: #222;
+  min-height: 100vh;
+}
 
-  h2 {
-    text-align: center;
-    margin-bottom: 20px;
-  }
+/* Title */
+h2 {
+  text-align: center;
+  margin-bottom: 35px;
+  font-size: 2.2rem;
+  letter-spacing: 1px;
+  color: #d421d4;
+  -webkit-text-stroke: 0.25px #000000;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.2),
+               0 0 10px rgba(0,255,200,0.3);
+  animation: glowPulse 1s infinite alternate;
+}
+
+/* Subtle animated glow */
+@keyframes glowPulse {
+  from { text-shadow: 0 2px 4px rgba(52, 6, 255, 0.992), 0 0 10px rgb(202, 13, 231); }
+  to   { text-shadow: 0 2px 8px rgba(0,0,0,0.2), 0 0 15px  rgba(0,0,0,0.2)< }
+}
 
   /* Main container: 3 columns */
   .telemetry-container {
@@ -39,6 +55,7 @@
   .telemetry-box {
     background: #fff;
     border-radius: 12px;
+    border: 4px solid #000000;
     padding: 15px 20px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.15);
     text-align: left;
@@ -66,10 +83,11 @@
   .camera-box {
     background: #fff;
     border-radius: 12px;
+    border: 4px solid #000000;
     padding: 15px 20px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.15);
     text-align: center;
-    height: 442px;
+    height: 500px;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -82,7 +100,7 @@
     border-radius: 8px;
   }
 
-  /* Controls section */
+  /********** Controls section **********/
   .controls-line {
     margin: 20px 0;
     border-top: 4px solid #000;
@@ -99,6 +117,7 @@
   .controls-box {
     background: #fff;
     border-radius: 12px;
+    border: 4px solid #000000;
     padding: 10px;
     display: grid;
     gap: 1px;
@@ -109,24 +128,30 @@
 
   /* Arrow buttons grid */
   .arrow-buttons {
-    grid-template-areas:
-      ". up ."
-      "left . right"
-      ". down .";
-    width: 400px;
-    height: 400px;
+  display: grid;
+  grid-template-areas:
+    ". up ."
+    "left . right"
+    ". down .";
+  width: 100%;
+  max-width: 400px;  /* keeps it from being too wide on big screens */
+  aspect-ratio: 1 / 1; /* keeps it perfectly square */
+  margin: 0 auto;      /* centers it horizontally */
+  place-items: center; /* centers children */
+  gap: 0px;
+  box-sizing: border-box;
   }
 
   .control-button {
-    padding: 20px;
-    font-size: 4rem;
-    border: none;
-    border-radius: 8px;
-    background-color: #ff5e00;
-    color: white;
-    cursor: pointer;
-    width: 120px;
-    height: 120px;
+  padding: 20px;
+  font-size: 4rem;
+  border: none;
+  border-radius: 8px;
+  background-color: #ff5e00;
+  color: white;
+  cursor: pointer;
+  width: 120px;
+  height: 120px;
   }
 
   .control-button:hover {
@@ -135,11 +160,17 @@
   }
 
   .command-button {
-  padding: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;       /* center multiline text horizontally */
+  white-space: normal;      /* allow wrapping */
+  line-height: 1.2;         /* keep balanced spacing between lines */
+  padding: 10px;            /* smaller padding for better centering */
   font-size: 1.5rem;
   border: none;
   border-radius: 15px;
-  background-color: #0077cc; /* Blue tone */
+  background-color: #0077cc;
   color: white;
   cursor: pointer;
   width: 170px;
@@ -158,42 +189,156 @@
   .control-right { grid-area: right; }
 
   .command-button-box {
+  background: #fff;
+  border-radius: 12px;
+  padding: 15px 20px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 0px 30px;              /* spacing between the two buttons */
-  width: 400px;
-  height: 400px;
-  flex-wrap: wrap;        /* ensures wrapping on small screens */
+  flex-wrap: wrap;
+  gap: 20px;
+  width: 100%;
+  max-width: 400px;   /* prevents being too wide on large screens */
+  margin: 0 auto;     /* centers horizontally */
   }
 
-  /* Responsive */
-  @media (max-width: 900px) {
-    .telemetry-container {
-      flex-direction: column;
-      align-items: center;
-    }
-    .left-column, .middle-column, .right-column {
-      flex: 1 1 100%;
-      max-width: none;
-    }
+  .command-inputs-box {
+  background: #fff;
+  border-radius: 12px;
+  border: 4px solid #000000;
+  padding: 15px 20px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  width: 100%;
+  max-width: 400px;   /* prevents being too wide on large screens */
+  margin: 0 auto;     /* centers horizontally */
   }
 
-  @media (max-width: 600px) {
-    .controls-container {
-      flex-direction: column;
-      align-items: center;
-    }
-    .arrow-buttons, .image-button-box {
-      width: 90%;
-      height: auto;
-    }
-    .control-button {
-      width: 80px;
-      height: 80px;
-      font-size: 2.5rem;
-    }
+  .command-input-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   }
+
+  .command-input-row label {
+  flex: 1;
+  font-weight: 500;
+  font-size: 0.95rem;
+  }
+
+ .current-value-box {
+  min-width: 60px;              /* roughly same width as input */
+  padding: 6px 12px;            /* same padding as button */
+  border-radius: 6px;
+  background-color: #f0f0f0;    /* light gray background */
+  border: 1px solid #ccc;
+  text-align: right;
+  font-size: 0.70rem;
+  color: #333;
+  box-sizing: border-box;
+ }
+
+
+  .command-input-row input {
+  width: 50px;
+  padding: 5px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  text-align: right;
+  }
+
+  .command-input-row button {
+  padding: 6px 12px;
+  background-color: #0077cc;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  }
+
+  .command-input-row button:hover {
+  background-color: #005fa3;
+  transform: scale(1.05);
+  }
+
+/* Responsive */
+@media (max-width: 900px) {
+
+  /* Stack telemetry columns */
+  .telemetry-container {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .left-column,
+  .middle-column,
+  .right-column {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  /* Center controls */
+  .controls-container {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* Arrow buttons grid scaling */
+  .arrow-buttons,
+  .image-button-box {
+    width: 90%;
+    max-width: none;
+    aspect-ratio: 1 / 1;
+    gap: 5px;
+    margin: 0 auto;
+  }
+
+  .control-button {
+    width: 80px;       /* smaller buttons for small screens */
+    height: 80px;
+    font-size: 2rem;
+    padding: 10px;
+  }
+
+  /* Command boxes fit screen width */
+  .command-button-box,
+  .command-inputs-box {
+    width: 90%;
+    max-width: none;
+    height: auto;
+    gap: 15px;
+    margin: 0 auto;
+  }
+
+  .command-button {
+    width: 120px;
+    height: 120px;
+    font-size: 1.2rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
+    padding: 10px;
+  }
+
+  .command-input-row label {
+    font-size: 0.9rem;
+  }
+
+  .command-input-row input {
+    width: 60px;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -205,29 +350,29 @@
     <div class="telemetry-box">
       <h3>Intensidad de Señal</h3>
       <div class="telemetry-grid">
-        <div>RSSI Actual:</div><div id="rssiCurr">-- [dBm]</div>
-        <div>RSSI Promediado:</div><div id="rssiAvg">-- [dBm]</div>
+        <div>RSSI Actual:</div><div><span id="rssiCurr">--</span> [dBm]</div>
+        <div>RSSI Promediado:</div><div><span id="rssiAvg">--</span> [dBm]</div>
       </div>
     </div>
 
     <div class="telemetry-box">
       <h3>Sensores de Distancia</h3>
       <div class="telemetry-grid">
-        <div>Distancia 1:</div><div id="dist1">-- [mm]</div>
-        <div>Distancia 2:</div><div id="dist2">-- [mm]</div>
-        <div>Distancia 3:</div><div id="dist3">-- [mm]</div>
+        <div>Distancia 1:</div><div><span id="dist1">--</span> [mm]</div>
+        <div>Distancia 2:</div><div><span id="dist2">--</span> [mm]</div>
+        <div>Distancia 3:</div><div><span id="dist3">--</span> [mm]</div>
       </div>
     </div>
 
     <div class="telemetry-box">
       <h3>Accel & Gyro</h3>
       <div class="telemetry-grid">
-        <div>Accel X:</div><div id="accX">-- [g]</div>
-        <div>Accel Y:</div><div id="accY">-- [g]</div>
-        <div>Accel Z:</div><div id="accZ">-- [g]</div>
-        <div>ΔÁngulo X:</div><div id="angX">-- [°/s]</div>
-        <div>ΔÁngulo Y:</div><div id="angY">-- [°/s]</div>
-        <div>ΔÁngulo Z:</div><div id="angZ">-- [°/s]</div>
+        <div>Accel X:</div><div><span id="accX">--</span> [g]</div>
+        <div>Accel Y:</div><div><span id="accY">--</span> [g]</div>
+        <div>Accel Z:</div><div><span id="accZ">--</span> [g]</div>
+        <div>ΔÁngulo X:</div><div><span id="angX">--</span> [°/s]</div>
+        <div>ΔÁngulo Y:</div><div><span id="angY">--</span> [°/s]</div>
+        <div>ΔÁngulo Z:</div><div><span id="angZ">--</span> [°/s]</div>
       </div>
     </div>
   </div>
@@ -235,32 +380,34 @@
   <!-- Middle Column -->
   <div class="column middle-column">
     <div class="telemetry-box">
-      <h3>Temperatura y Humedad</h3>
+      <h3>Temperatura & Humedad</h3>
       <div class="telemetry-grid">
-        <div>Temp. Interna:</div><div id="tempInt">-- [°C]</div>
-        <div>Hum. Interna:</div><div id="humInt">-- [%]</div>
-        <div>Temp. Externa:</div><div id="tempExt">-- [°C]</div>
-        <div>Hum. Externa:</div><div id="humExt">-- [%]</div>
+        <div>Temp. Interna:</div><div><span id="tempInt">--</span> [°C]</div>
+        <div>Hum. Interna:</div><div><span id="humInt">--</span> [%]</div>
+        <div>Temp. Externa:</div><div><span id="tempExt">--</span> [°C]</div>
+        <div>Hum. Externa:</div><div><span id="humExt">--</span> [%]</div>
       </div>
     </div>
 
     <div class="telemetry-box">
       <h3>Lecturas de Alimentación</h3>
       <div class="telemetry-grid">
-        <div>ESP+CAM Voltaje:</div><div id="voltEsp">-- [V]</div>
-        <div>ESP+CAM Corriente:</div><div id="currEsp">-- [mA]</div>
-        <div>ESP+CAM Potencia:</div><div id="powEsp">-- [mW]</div>
-        <div>Motor 1 Voltaje:</div><div id="voltM1">-- [V]</div>
-        <div>Motor 1 Corriente:</div><div id="currM1">-- [mA]</div>
-        <div>Motor 1 Potencia:</div><div id="powM1">-- [mW]</div>
-        <div>Motor 2 Voltaje:</div><div id="voltM2">-- [V]</div>
-        <div>Motor 2 Corriente:</div><div id="currM2">-- [mA]</div>
-        <div>Motor 2 Potencia:</div><div id="powM2">-- [mW]</div>
+        <div>ESP+CAM Voltaje:</div><div><span id="voltEsp">--</span> [V]</div>
+        <div>ESP+CAM Corriente:</div><div><span id="currEsp">--</span> [mA]</div>
+        <div>ESP+CAM Potencia:</div><div><span id="powEsp">--</span> [mW]</div>
+
+        <div>Motor 1 Voltaje:</div><div><span id="voltM1">--</span> [V]</div>
+        <div>Motor 1 Corriente:</div><div><span id="currM1">--</span> [mA]</div>
+        <div>Motor 1 Potencia:</div><div><span id="powM1">--</span> [mW]</div>
+
+        <div>Motor 2 Voltaje:</div><div><span id="voltM2">--</span> [V]</div>
+        <div>Motor 2 Corriente:</div><div><span id="currM2">--</span> [mA]</div>
+        <div>Motor 2 Potencia:</div><div><span id="powM2">--</span> [mW]</div>
       </div>
     </div>
   </div>
 
-  <!-- Right Column -->
+  <!-- Right Column (untouched) -->
   <div class="column right-column">
     <div class="camera-box">
       <h3>Última Imagen Guardada</h3>
@@ -283,16 +430,58 @@
 
   <div class="controls-box command-button-box">
     <button id="requestImage" class="command-button" style="background-color: #28a745;">Obtener Imagen</button>
-    <button id="captureImage" class="command-button" style="background-color: #28a745;">Solicitar Imagen</button>
+    <button id="captureImage" class="command-button" style="background-color: #28a745;">Capturar Imagen</button>
+    <button id="cancelImage" class="command-button" style="background-color: #28a745;">Cancelar Imagen</button>
+  </div>
+
+  <div class="controls-box command-button-box">
     <button id="recvTel" class="command-button" style="background-color: #28a7a5;">Recibir Telemetría</button>
     <button id="stopTel" class="command-button" style="background-color: #28a7a5;">Detener Telemetría</button>
   </div>
 
   <div class="controls-box command-button-box">
-    <button id="forceShort" class="command-button">LoRa: <br> <br> Corto Alcance</button>
-    <button id="forceMid" class="command-button">LoRa: <br> <br> Medio Alcance</button>
-    <button id="forceLong" class="command-button">LoRa: <br> <br> Largo Alcance</button>
+    <button id="forceShort" class="command-button">-LoRa- <br> Corto Alcance</button>
+    <button id="forceMid" class="command-button">-LoRa- <br> Medio Alcance</button>
+    <button id="forceLong" class="command-button">-LoRa- <br> Largo Alcance</button>
   </div>
+
+<div class="command-inputs-box">
+  <div class="command-input-row">
+    <label for="intervalInput">Intervalo Telemetría (s):</label>
+    <div class="current-value-box" id="currInterval">1.0</div>
+    <input type="number" id="intervalInput" min="1" max="120" value="1">
+    <button id="setIntervalBtn">Enviar</button>
+  </div>
+
+  <div class="command-input-row">
+    <label for="speedInput">Tamaño de Chunks (B):</label>
+    <div class="current-value-box" id="currChunks">128</div>
+    <input type="number" id="chunkSize" min="1" max="200" value="128">
+    <button id="setSpeedBtn">Enviar</button>
+  </div>
+
+  <div class="command-input-row">
+    <label for="angleInput">Pasos de Motor (6400/T):</label>
+    <div class="current-value-box" id="currSteps">3840</div>
+    <input type="number" id="stepSize" min="1" max="12,800" value="3840">
+    <button id="setAngleBtn">Enviar</button>
+  </div>
+
+  <div class="command-input-row">
+    <label for="delayInput">PLACEHOLDER</label>
+    <div class="current-value-box" id="currPH1">1000</div>
+    <input type="number" id="PH1" min="0" max="5000" value="1000">
+    <button id="setDelayBtn">Enviar</button>
+  </div>
+
+  <div class="command-input-row">
+    <label for="gainInput">PLACEHOLDER</label>
+    <div class="current-value-box" id="currPH2">1000</div>
+    <input type="number" id="PH2" min="0" max="5000" value="1000">
+    <button id="setGainBtn">Enviar</button>
+  </div>
+</div>
+
 
 </div>
 
