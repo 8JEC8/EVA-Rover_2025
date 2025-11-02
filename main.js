@@ -81,9 +81,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnLeft').addEventListener('click', () => sendCommand('LEFT'));
   document.getElementById('btnRight').addEventListener('click', () => sendCommand('RIGHT'));
 
-  // Image & telemetry buttons
+  // Image buttons
   document.getElementById('requestImage').addEventListener('click', () => sendCommand('WEB_IMG'));
   document.getElementById('captureImage').addEventListener('click', () => sendCommand('CAPTURE_IMG'));
+  document.getElementById('cancelImage').addEventListener('click', () => sendCommand('CANCEL_IMG'));
+
+  // Telemetry buttons
   document.getElementById('recvTel').addEventListener('click', () => sendCommand('START_TEL'));
   document.getElementById('stopTel').addEventListener('click', () => sendCommand('STOP_TEL'));
 
