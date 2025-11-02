@@ -8,6 +8,16 @@
 #define LORA_SS   5    // CS
 #define LORA_DIO0 25   // DIO0
 
+//////////////////////////////////////////////////////////////////////////////////////////////////// HTML embebido
+const char index_html[] PROGMEM = R"rawliteral(
+
+)rawliteral";
+
+//////////////////////////////////////////////////////////////////////////////////////////////////// JS embebido
+const char main_js[] PROGMEM = R"rawliteral(
+
+)rawliteral";
+
 HardwareSerial dfSerial(2);
 DFRobotDFPlayerMini myDFPlayer;
 
@@ -28,18 +38,9 @@ struct Track {
 Track trackQueue[10];
 int queueSize = 0;
 
-const int punFolder = 3;                  // Example folder for puns
-const int punTracks[] = {
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-  11,12,13,14,15
-};
-const int numPunTracks = sizeof(punTracks)/sizeof(punTracks[0]);
-
-// Timer
-unsigned long lastPunTime = 0;
-const unsigned long punInterval = 5UL * 60UL * 1000UL; // 10 minutes in ms
-
 String imgBuffer = "";
+String webImage = "";
+
 int expectedChunks = 0;
 int receivedChunks = 0;
 bool receivingImage = false;
@@ -62,9 +63,9 @@ enum LoRaRange { SHORT, MID, LONG };
 LoRaRange currentRange = SHORT;  // Iniciar SHORT
 
 // RSSI Threshold
-const int shortToMid = -85;   // SHORT → MID
+const int shortToMid = -65;   // SHORT → MID
 const int midToShort  = -45;  // MID → SHORT
-const int midToLong   = -102; // MID → LONG
+const int midToLong   = -100; // MID → LONG
 const int longToMid   = -90;  // LONG → MID
 
 // Promedio RSSI
@@ -88,7 +89,7 @@ void setup() {
   // Start AP
   WiFi.softAP(apSSID, apPassword);
   IPAddress IP = WiFi.softAPIP();
-  Serial.print("Conectar a Dashboard: ");
+  Serial.print("\nConectar a Dashboard: http://");
   Serial.println(IP);
 
   // Serve HTML
@@ -108,7 +109,6 @@ void setup() {
   webSocket.onEvent(onWebSocketEvent);
 
   myDFPlayer.volume(23);
-  randomSeed(analogRead(0));
 
   SPI.begin();
 
@@ -128,7 +128,7 @@ void setup() {
   LoRa.setPreambleLength(6); // Preamble: 10 symbols
   LoRa.enableCrc(); // CRC
 
-  Serial.println("\nVoyager21: Comunicación LoRa Habillitada");
+  Serial.println("Voyager21: Comunicación LoRa Habillitada");
   Serial.println("'.COMLIST' para Lista de Comandos Disponibles");
   queueTrack(2, 1);
 }
@@ -138,11 +138,6 @@ void loop() {
 
   webSocket.loop();
   server.handleClient();
-
-  if (now - lastPunTime >= punInterval) {
-    lastPunTime = now;
-    playRandomPun();
-  }
 
   if (myDFPlayer.available()) {
     int type = myDFPlayer.readType();
@@ -196,7 +191,6 @@ void loop() {
             if (avgRssi < shortToMid) {
                 Serial.println("AUTOSWITCH_MID");
                 queueMessage("MRA");
-                queueTrack(2, 12);
             }
             break;
 
@@ -204,11 +198,9 @@ void loop() {
             if (avgRssi > midToShort) {
                 Serial.println("AUTOSWITCH_SHORT");
                 queueMessage("SRA");
-                queueTrack(2, 10);
             } else if (avgRssi < midToLong) {
                 Serial.println("AUTOSWITCH_LONG");
                 queueMessage("LRA");
-                queueTrack(2, 11);
             }
             break;
 
@@ -216,7 +208,6 @@ void loop() {
             if (avgRssi > longToMid) {
                 Serial.println("AUTOSWITCH_MID");
                 queueMessage("MRA");
-                queueTrack(2, 12);
             }
             break;
     }
@@ -242,10 +233,8 @@ void loop() {
 
     else if (received.indexOf(',') != -1) {
       String webTelemetry = String(rssi) + "," + String(avgRssi) + "," + received;
-      Serial.println("  RECV_ROVER_" + webTelemetry);
       webSocket.broadcastTXT(webTelemetry);
     }
-
 
     // Handle chunk data
     else if (received.startsWith("C_")) {
@@ -283,9 +272,10 @@ void loop() {
             Serial.printf("IMG_RECEPTION_COMPLETE_%d\n", receivedChunks);
             Serial.println("B64_IMAGE_START");
             Serial.println(imgBuffer);
+            webImage = imgBuffer;
             Serial.println("B64_IMAGE_END");
             myDFPlayer.playFolder(2, 9);
-            // imgBuffer = "";
+            imgBuffer = "";
           }
         } else {
           Serial.printf("CHUNK_%d_INVALID(len=%d,b64=%s)_REREQ\n",
@@ -391,15 +381,8 @@ void handleSerial() {
       LoRaLong();
     }
     else if (serialInput.equalsIgnoreCase(".CANCEL")) {
-      // Immediately stop image reception and clear queue
-      receivingImage = false;
-      imgBuffer = "";
-      expectedChunks = 0;
-      receivedChunks = 0;
-      msgQueued = false;
-      msgToSend = "";
-      Serial.println("IMAGE_TRANSFER_CANCELLED");
-      myDFPlayer.playFolder(2, 13);
+      // Detener recepción y limpiar buffer
+      cancelImageTransfer();
     }
     else if (serialInput.equalsIgnoreCase(".W")) queueMessage("W");
     else if (serialInput.equalsIgnoreCase(".S")) queueMessage("S");
@@ -420,76 +403,8 @@ void handleSerial() {
 void queueMessage(String msg) {
   msgToSend = msg;
   msgQueued = true;
-  lastSendAttempt = 0;  // force immediate send next loop
+  lastSendAttempt = 0;  // Enviar inmediatamente, enviar en siguiente ciclo si es necesario
   msgStartTime = 0;
-}
-
-void LoRaShort() {
-  Serial.println("LoRa_CHANGE_SF7");
-  LoRa.setSpreadingFactor(7);
-  LoRa.setSignalBandwidth(250E3);
-  LoRa.setCodingRate4(5);
-  LoRa.setPreambleLength(6);
-  retryInterval = 300;
-  ackTimeout = 3000;
-  chunkTimeout = 2000;
-  currentRange = SHORT;
-}
-
-void LoRaMid() {
-  Serial.println("LoRa_CHANGE_SF9");
-  LoRa.setSpreadingFactor(9);
-  LoRa.setSignalBandwidth(125E3);
-  LoRa.setCodingRate4(6);
-  LoRa.setPreambleLength(8);
-  retryInterval = 500;
-  ackTimeout = 5000;
-  chunkTimeout = 3000;
-  currentRange = MID;
-}
-
-void LoRaLong() {
-  Serial.println("LoRa_CHANGE_SF11");
-  LoRa.setSpreadingFactor(11);
-  LoRa.setSignalBandwidth(125E3);
-  LoRa.setCodingRate4(8);
-  LoRa.setPreambleLength(10);
-  retryInterval = 2000;
-  ackTimeout = 8000;
-  chunkTimeout = 5000;
-  currentRange = LONG;
-}
-
-void queueTrack(int folder, int track) {
-  if (queueSize >= 10) return;
-  trackQueue[queueSize++] = {folder, track};
-
-  if (queueSize == 1) {
-    myDFPlayer.playFolder(trackQueue[0].folder, trackQueue[0].track);
-  }
-}
-
-void playRandomPun() {
-  int index = random(numPunTracks);
-  int trackNum = punTracks[index];
-  queueTrack(punFolder, trackNum);
-}
-
-void printCommandList() {
-  Serial.println("  Lista de Comandos:");
-  Serial.println("    '.W'            : Movimiento Hacia Adelante");
-  Serial.println("    '.S'            : Movimiento Hacia Atrás");
-  Serial.println("    '.A'            : Movimiento CCW");
-  Serial.println("    '.D'            : Movimiento CW");
-  Serial.println("    '.STEP#'        : Elegir cantidad de Steps (1/32: 6400/Vuelta)");
-  Serial.println("    '.INTERVAL#'    : Elegir intervalo de CSV");
-  Serial.println("    '.FORCE###'     : Cambiar configuración LoRa: SHORT, MID, LONG");
-  Serial.println("    '.CALCULATE'    : Calcula la ruta");
-  Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
-  Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
-  Serial.println("    '.SHOW'         : Muestra la ruta calculada");
-  Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
-  Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
 }
 
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length) {
@@ -510,7 +425,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
       msg.trim();
 
       if(msg == "WEB_IMG") {
-        webSocket.sendTXT(client_num, "IMG_" + imgBuffer); // send current image only to the requester
+        webSocket.sendTXT(client_num, "IMG_" + webImage); // send current image only to the requester
         return; // skip the controller check
       }
 
@@ -520,11 +435,12 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
         else if(msg == "LEFT") queueMessage("A");
         else if(msg == "RIGHT") queueMessage("D");
         else if(msg == "CAPTURE_IMG") queueMessage("IMG");
+        else if(msg == "CANCEL_IMG") cancelImageTransfer();
         else if(msg == "START_TEL") queueMessage("GO");
         else if(msg == "STOP_TEL") queueMessage("STP");
-        else if(msg == "LORA_SHORT") queueMessage("SRA");
-        else if(msg == "LORA_MEDIUM") queueMessage("MRA");
-        else if(msg == "LORA_LONG") queueMessage("LRA");
+        else if(msg == "LORA_SHORT") LoRaShort();
+        else if(msg == "LORA_MEDIUM") LoRaMid();
+        else if(msg == "LORA_LONG") LoRaLong();
       } else {
         Serial.printf("CLIENT_%u_ATTEMPT_NOTCONTROLLER\n", client_num);
       }
@@ -533,6 +449,80 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
     default:
       break;
   }
+}
+
+void LoRaShort() {
+  Serial.println("LoRa_CHANGE_SF7");
+  LoRa.idle();
+  delay(150);
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSignalBandwidth(250E3);
+  LoRa.setCodingRate4(5);
+  LoRa.setPreambleLength(6);
+  delay(50);
+  retryInterval = 400;
+  ackTimeout = 2000;
+  chunkTimeout = 2000;
+  currentRange = SHORT;
+  queueTrack(2, 10);
+}
+
+void LoRaMid() {
+  Serial.println("LoRa_CHANGE_SF9");
+  LoRa.idle();
+  delay(150);
+  LoRa.setSpreadingFactor(9);
+  LoRa.setSignalBandwidth(125E3);
+  LoRa.setCodingRate4(6);
+  LoRa.setPreambleLength(8);
+  delay(50);
+  retryInterval = 500;
+  ackTimeout = 5000;
+  chunkTimeout = 3000;
+  currentRange = MID;
+  queueTrack(2, 12);
+}
+
+void LoRaLong() {
+  Serial.println("LoRa_CHANGE_SF11");
+  LoRa.idle();
+  delay(150);
+  LoRa.setSpreadingFactor(11);
+  LoRa.setSignalBandwidth(125E3);
+  LoRa.setCodingRate4(8);
+  LoRa.setPreambleLength(10);
+  delay(50);
+  retryInterval = 2000;
+  ackTimeout = 8000;
+  chunkTimeout = 5000;
+  currentRange = LONG;
+  queueTrack(2, 11);
+}
+
+void queueTrack(int folder, int track) {
+  if (queueSize >= 10) return;
+  trackQueue[queueSize++] = {folder, track};
+
+  if (queueSize == 1) {
+    myDFPlayer.playFolder(trackQueue[0].folder, trackQueue[0].track);
+  }
+}
+
+void printCommandList() {
+  Serial.println("  Lista de Comandos:");
+  Serial.println("    '.W'            : Movimiento Hacia Adelante");
+  Serial.println("    '.S'            : Movimiento Hacia Atrás");
+  Serial.println("    '.A'            : Movimiento CCW");
+  Serial.println("    '.D'            : Movimiento CW");
+  Serial.println("    '.STEP#'        : Elegir cantidad de Steps (1/32: 6400/Vuelta)");
+  Serial.println("    '.INTERVAL#'    : Elegir intervalo de CSV");
+  Serial.println("    '.FORCE###'     : Cambiar configuración LoRa: SHORT, MID, LONG");
+  Serial.println("    '.CALCULATE'    : Calcula la ruta");
+  Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
+  Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
+  Serial.println("    '.SHOW'         : Muestra la ruta calculada");
+  Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
+  Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
 }
 
 void handleAckSound(const String &ackFor) {
@@ -581,4 +571,15 @@ void playMusic(int folder, int track) {
     myDFPlayer.stop();
     queueSize = 0;           // clear any queued command audio
     myDFPlayer.playFolder(folder, track);
+}
+
+void cancelImageTransfer() {
+  receivingImage = false;
+  imgBuffer = "";
+  expectedChunks = 0;
+  receivedChunks = 0;
+  msgQueued = false;
+  msgToSend = "";
+  Serial.println("IMAGE_TRANSFER_CANCELLED");
+  myDFPlayer.playFolder(2, 13);
 }
