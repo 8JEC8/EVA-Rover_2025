@@ -227,21 +227,30 @@ void handleRequest(String cmd) {
   }
 
   if (cmd.startsWith("REQ_")) {
-    int reqNum = cmd.substring(4).toInt();
-    if (reqNum >= 1 && reqNum <= totalChunks) {
-      String packet = "C_" + imageChunks[reqNum - 1];
-      LoRa.beginPacket();
-      LoRa.print(packet);
-      LoRa.endPacket();
+      int reqNum = cmd.substring(4).toInt();
+      if (reqNum >= 1 && reqNum <= totalChunks) {
 
-      if (reqNum == totalChunks && wasReceivingTel) {
-        Serial.println("GO");
-        receivingTel = true;
+          if (reqNum == totalChunks) {
+              delay(250);
+          }
+
+          String packet = "C_" + imageChunks[reqNum - 1];
+
+          LoRa.beginPacket();
+          LoRa.print(packet);
+          LoRa.endPacket();
+          delay(25); // small gap between packets
+
+          // Resume TEL after sending last chunk
+          if (reqNum == totalChunks && wasReceivingTel) {
+              Serial.println("GO");
+              receivingTel = true;
+          }
+
+      } else {
+          // Número de Chunk no válido
       }
-    } else {
-      // Número de Chunk no válido
-    }
-    return;
+      return;
   }
 
   // FWD LoRa a Rover a través de Serial
