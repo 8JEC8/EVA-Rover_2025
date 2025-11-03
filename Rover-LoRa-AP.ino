@@ -1,6 +1,5 @@
 #include <SPI.h>
 #include <LoRa.h>
-#include <DFRobotDFPlayerMini.h>
 #include <WiFi.h>
 #include <WebSocketsServer.h>
 #include <WebServer.h> 
@@ -18,9 +17,6 @@ const char main_js[] PROGMEM = R"rawliteral(
 
 )rawliteral";
 
-HardwareSerial dfSerial(2);
-DFRobotDFPlayerMini myDFPlayer;
-
 const char* apSSID = "EVA_Dashboard";
 const char* apPassword = "12345678";  // min 8 chars
 
@@ -29,14 +25,6 @@ WebSocketsServer webSocket = WebSocketsServer(81);
 
 // Only first client can control
 uint8_t controllerClient = 255; // 255 = no controller yet
-
-struct Track {
-  int folder;
-  int track;
-};
-
-Track trackQueue[10];
-int queueSize = 0;
 
 String imgBuffer = "";
 String webImage = "";
@@ -80,12 +68,6 @@ void setup() {
   
   while (!Serial);
 
-  dfSerial.begin(9600, SERIAL_8N1, 22, 21);
-
-  if (!myDFPlayer.begin(dfSerial)) {
-    while (true);
-  }
-
   // Start AP
   WiFi.softAP(apSSID, apPassword);
   IPAddress IP = WiFi.softAPIP();
@@ -108,8 +90,6 @@ void setup() {
   webSocket.begin();
   webSocket.onEvent(onWebSocketEvent);
 
-  myDFPlayer.volume(23);
-
   SPI.begin();
 
   LoRa.setPins(LORA_SS, -1, LORA_DIO0);
@@ -130,7 +110,6 @@ void setup() {
 
   Serial.println("Voyager21: Comunicación LoRa Habillitada");
   Serial.println("'.COMLIST' para Lista de Comandos Disponibles");
-  queueTrack(2, 1);
 }
 
 void loop() {
@@ -138,17 +117,6 @@ void loop() {
 
   webSocket.loop();
   server.handleClient();
-
-  if (myDFPlayer.available()) {
-    int type = myDFPlayer.readType();
-    if (type == DFPlayerPlayFinished) {
-      // Shift queue
-      for (int i = 1; i < queueSize; i++) trackQueue[i - 1] = trackQueue[i];
-      queueSize--;
-      if (queueSize > 0)
-        myDFPlayer.playFolder(trackQueue[0].folder, trackQueue[0].track);
-    }
-  }
 
   // --- RECEIVE: LoRa ---
   int packetSize = LoRa.parsePacket();
@@ -181,8 +149,6 @@ void loop() {
             if (ackFor == "LRA") LoRaLong();
             if (receivingImage && ackFor.startsWith("REQ_")) lastChunkRequestTime = now;
         }
-
-        handleAckSound(ackFor);
     }
 
     // Cambio dinámico dependiendo de Thresholds
@@ -214,14 +180,13 @@ void loop() {
 
     // Handle image ready signal
     if (received.startsWith("IMG_SIZE")) {
-      queueSize = 0;
-      queueTrack(2, 8);
-      queueTrack(1, 1);
       expectedChunks = received.substring(received.indexOf(',') + 1).toInt();
       receivedChunks = 0;
       imgBuffer = "";
+      webImage = "";
       receivingImage = true;
       Serial.printf("EXPECTING_%d_CHUNKS\n", expectedChunks);
+      webSocket.broadcastTXT("IMG_START");
 
       // Start requesting first chunk
       msgToSend = "REQ_1";
@@ -274,8 +239,8 @@ void loop() {
             Serial.println(imgBuffer);
             webImage = imgBuffer;
             Serial.println("B64_IMAGE_END");
-            myDFPlayer.playFolder(2, 9);
             imgBuffer = "";
+            webSocket.broadcastTXT("IMG_DONE");
           }
         } else {
           Serial.printf("CHUNK_%d_INVALID(len=%d,b64=%s)_REREQ\n",
@@ -394,8 +359,8 @@ void handleSerial() {
     else if (serialInput.equalsIgnoreCase(".LONG")) queueMessage("LRA");
     else if (serialInput.equalsIgnoreCase(".START")) queueMessage("GO");
     else if (serialInput.equalsIgnoreCase(".STOP")) queueMessage("STP");
-    else if (!handleTrackCommand(serialInput)) {
-        Serial.println("UNKNOWN_IGNORED");
+    else  {
+      Serial.println("UNKNOWN_IGNORED");
     }
   }
 }
@@ -407,45 +372,97 @@ void queueMessage(String msg) {
   msgStartTime = 0;
 }
 
+void broadcastControlState() {
+  String msg = "CTRL_" + String(controllerClient);
+  webSocket.broadcastTXT(msg);
+}
+
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
     case WStype_CONNECTED: {
       Serial.printf("CLIENT_%u_CONN\n", client_num);
-      // Assign first controller if none
-      if(controllerClient == 255) controllerClient = client_num;
+
+      // Tell this client its real ESP-assigned ID
+      webSocket.sendTXT(client_num, "ASSIGN_ID_" + String(client_num));
+
+      // Send current control state
+      String helloMsg = "CTRL_" + String(controllerClient);
+      webSocket.sendTXT(client_num, helloMsg);
+
+      // If no controller, make this one controller
+      if (controllerClient == 255) {
+        controllerClient = client_num;
+        broadcastControlState();
+        Serial.printf("CLIENT_%u_BECAME_CONTROLLER\n", client_num);
+      }
       break;
     }
+
     case WStype_DISCONNECTED: {
       Serial.printf("CLIENT_%u_DC\n", client_num);
-      if(client_num == controllerClient) controllerClient = 255;
+
+      // If the controller disconnects, release control
+      if (client_num == controllerClient) {
+        controllerClient = 255;
+        broadcastControlState();
+        Serial.println("Controller disconnected, control released");
+      }
       break;
     }
+
     case WStype_TEXT: {
       String msg = String((char*)payload);
       msg.trim();
 
-      if(msg == "WEB_IMG") {
-        webSocket.sendTXT(client_num, "IMG_" + webImage); // send current image only to the requester
-        return; // skip the controller check
+      // --- Handle control requests ---
+      if (msg == "REQUEST_CONTROL") {
+        if (controllerClient == 255) {
+          controllerClient = client_num;
+          broadcastControlState();
+          Serial.printf("CLIENT_%u_TAKES_CONTROL\n", client_num);
+        } else {
+          Serial.printf("CLIENT_%u_REQUEST_DENIED, CONTROLLER_%u_ACTIVE\n", client_num, controllerClient);
+        }
+        return;
       }
 
-      if(client_num == controllerClient) {
-        if(msg == "UP") queueMessage("W");
-        else if(msg == "DOWN") queueMessage("S");
-        else if(msg == "LEFT") queueMessage("A");
-        else if(msg == "RIGHT") queueMessage("D");
-        else if(msg == "CAPTURE_IMG") queueMessage("IMG");
-        else if(msg == "CANCEL_IMG") cancelImageTransfer();
-        else if(msg == "START_TEL") queueMessage("GO");
-        else if(msg == "STOP_TEL") queueMessage("STP");
-        else if(msg == "LORA_SHORT") LoRaShort();
-        else if(msg == "LORA_MEDIUM") LoRaMid();
-        else if(msg == "LORA_LONG") LoRaLong();
+      // --- Handle control release ---
+      if (msg == "RELEASE_CONTROL") {
+        if (client_num == controllerClient) {
+          controllerClient = 255;
+          broadcastControlState();
+          Serial.printf("CLIENT_%u_RELEASES_CONTROL\n", client_num);
+        } else {
+          Serial.printf("CLIENT_%u_NOT_CONTROLLER_CANNOT_RELEASE\n", client_num);
+        }
+        return;
+      }
+
+      // --- Image request (anyone can do this) ---
+      if (msg == "WEB_IMG") {
+        webSocket.sendTXT(client_num, "IMG_" + webImage);
+        return;
+      }
+
+      // --- Only controller can send control commands ---
+      if (client_num == controllerClient) {
+        if (msg == "UP") queueMessage("W");
+        else if (msg == "DOWN") queueMessage("S");
+        else if (msg == "LEFT") queueMessage("A");
+        else if (msg == "RIGHT") queueMessage("D");
+        else if (msg == "CAPTURE_IMG") queueMessage("IMG");
+        else if (msg == "CANCEL_IMG") cancelImageTransfer();
+        else if (msg == "START_TEL") queueMessage("GO");
+        else if (msg == "STOP_TEL") queueMessage("STP");
+        else if (msg == "LORA_SHORT") LoRaShort();
+        else if (msg == "LORA_MEDIUM") LoRaMid();
+        else if (msg == "LORA_LONG") LoRaLong();
       } else {
-        Serial.printf("CLIENT_%u_ATTEMPT_NOTCONTROLLER\n", client_num);
+        Serial.printf("CLIENT_%u_ATTEMPTED_CMD_BUT_NOT_CONTROLLER\n", client_num);
       }
       break;
     }
+
     default:
       break;
   }
@@ -464,7 +481,6 @@ void LoRaShort() {
   ackTimeout = 2000;
   chunkTimeout = 2000;
   currentRange = SHORT;
-  queueTrack(2, 10);
 }
 
 void LoRaMid() {
@@ -480,7 +496,6 @@ void LoRaMid() {
   ackTimeout = 5000;
   chunkTimeout = 3000;
   currentRange = MID;
-  queueTrack(2, 12);
 }
 
 void LoRaLong() {
@@ -496,16 +511,6 @@ void LoRaLong() {
   ackTimeout = 8000;
   chunkTimeout = 5000;
   currentRange = LONG;
-  queueTrack(2, 11);
-}
-
-void queueTrack(int folder, int track) {
-  if (queueSize >= 10) return;
-  trackQueue[queueSize++] = {folder, track};
-
-  if (queueSize == 1) {
-    myDFPlayer.playFolder(trackQueue[0].folder, trackQueue[0].track);
-  }
 }
 
 void printCommandList() {
@@ -525,61 +530,14 @@ void printCommandList() {
   Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
 }
 
-void handleAckSound(const String &ackFor) {
-  if (ackFor == "W") {
-    myDFPlayer.playFolder(2, 2);
-  } 
-  else if (ackFor == "A") {
-    myDFPlayer.playFolder(2, 5);
-  } 
-  else if (ackFor == "S") {
-    myDFPlayer.playFolder(2, 3);
-  } 
-  else if (ackFor == "D") {
-    myDFPlayer.playFolder(2, 4);
-  } 
-  else if (ackFor == "GO") {
-    myDFPlayer.playFolder(2, 6);
-  } 
-  else if (ackFor == "STP") {
-    myDFPlayer.playFolder(2, 7);
-  }
-}
-
-bool handleTrackCommand(const String &cmd) {
-    if (cmd.startsWith(".TRACK")) {
-        // Extract track number
-        int trackNum = cmd.substring(6).toInt();
-
-        if (trackNum <= 0 || trackNum > 255) {
-            Serial.println("INVALID_TRACK");
-            return true; // we handled it
-        }
-
-        // Instead of queueing, play it immediately
-        playMusic(1, trackNum); // folder 1, track trackNum
-
-        Serial.printf("PLAYING_TRACK%d\n", trackNum);
-        return true; // handled
-    }
-
-    return false; // not a .TRACK command
-}
-
-void playMusic(int folder, int track) {
-    // Optional: stop current music / commands if you want
-    myDFPlayer.stop();
-    queueSize = 0;           // clear any queued command audio
-    myDFPlayer.playFolder(folder, track);
-}
-
 void cancelImageTransfer() {
   receivingImage = false;
   imgBuffer = "";
+  webImage = "";
   expectedChunks = 0;
   receivedChunks = 0;
   msgQueued = false;
   msgToSend = "";
   Serial.println("IMAGE_TRANSFER_CANCELLED");
-  myDFPlayer.playFolder(2, 13);
+  webSocket.broadcastTXT("IMG_DONE");
 }
