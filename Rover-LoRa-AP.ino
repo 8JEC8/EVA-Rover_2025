@@ -18,7 +18,7 @@ const char main_js[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 const char* apSSID = "EVA_Dashboard";
-const char* apPassword = "12345678";  // min 8 chars
+const char* apPassword = "Voyager21";  // min 8 chars
 
 WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
@@ -393,7 +393,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
       if (controllerClient == 255) {
         controllerClient = client_num;
         broadcastControlState();
-        Serial.printf("CLIENT_%u_BECAME_CONTROLLER\n", client_num);
+        Serial.printf("CLIENT_%u_IS_CONTROLLER\n", client_num);
       }
       break;
     }
@@ -405,7 +405,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
       if (client_num == controllerClient) {
         controllerClient = 255;
         broadcastControlState();
-        Serial.println("Controller disconnected, control released");
+        Serial.println("CONTROLLER_DC_RELEASED");
       }
       break;
     }
@@ -421,7 +421,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
           broadcastControlState();
           Serial.printf("CLIENT_%u_TAKES_CONTROL\n", client_num);
         } else {
-          Serial.printf("CLIENT_%u_REQUEST_DENIED, CONTROLLER_%u_ACTIVE\n", client_num, controllerClient);
+          Serial.printf("CLIENT_%u_REQUEST_DENIED\n", client_num, controllerClient);
         }
         return;
       }
@@ -433,7 +433,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
           broadcastControlState();
           Serial.printf("CLIENT_%u_RELEASES_CONTROL\n", client_num);
         } else {
-          Serial.printf("CLIENT_%u_NOT_CONTROLLER_CANNOT_RELEASE\n", client_num);
+          //Serial.printf("CLIENT_%u_NOT_CONTROLLER_CANNOT_RELEASE\n", client_num);
         }
         return;
       }
@@ -458,7 +458,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
         else if (msg == "LORA_MEDIUM") LoRaMid();
         else if (msg == "LORA_LONG") LoRaLong();
       } else {
-        Serial.printf("CLIENT_%u_ATTEMPTED_CMD_BUT_NOT_CONTROLLER\n", client_num);
+        Serial.printf("CLIENT_%u_ATTEMPTED_CMD\n", client_num);
       }
       break;
     }
