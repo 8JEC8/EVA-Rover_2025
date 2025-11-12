@@ -2,10 +2,12 @@
 #include <LoRa.h>
 #include <WiFi.h>
 #include <WebSocketsServer.h>
-#include <WebServer.h> 
+#include <WebServer.h>
+#include "esp_task_wdt.h"
 #define LORA_FREQ 433E6
-#define LORA_SS   5    // CS
-#define LORA_DIO0 25   // DIO0
+#define LORA_SS   10    // CS
+#define LORA_DIO0 42   // DIO0
+#define WDT_TIMEOUT 10   // seconds
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// HTML embebido
 const char index_html[] PROGMEM = R"rawliteral(
@@ -29,22 +31,26 @@ uint8_t controllerClient = 255; // 255 = no controller yet
 String imgBuffer = "";
 String webImage = "";
 
+TaskHandle_t watchdogTaskHandle = NULL;
+
 int expectedChunks = 0;
 int receivedChunks = 0;
 bool receivingImage = false;
 
 String msgToSend = "";                    // Fila de mensaje de monitor serial
 bool msgQueued = false;
-unsigned long lastSendAttempt = 0;
+
 unsigned long retryInterval = 500;        // Default LoRa MID: ms entre intervalos de envío
+unsigned long ackTimeout = 2000;          // Default LoRa MID: 2 segundo de espera en reintento
+unsigned long chunkTimeout = 1500;        // Default LoRa MID: 2 segundos para reenviar solicitud de chunk
 
-unsigned long ackTimeout = 5000;          // Default LoRa MID: 5 segundo de espera en reintento
 unsigned long msgStartTime = 0;           // Cuando el mensaje fue enviado
-
+unsigned long lastSendAttempt = 0;
 unsigned long lastChunkRequestTime = 0;
-unsigned long chunkTimeout = 3000;        // Default LoRa MID: 3 segundos para reenviar solicitud de chunk
 
 int expectedLength = 128;
+float csvInt = 1.5;
+int nemaStep = 6400;
 
 // Estados LoRa
 enum LoRaRange { SHORT, MID, LONG };
@@ -57,7 +63,7 @@ const int midToLong   = -100; // MID → LONG
 const int longToMid   = -90;  // LONG → MID
 
 // Promedio RSSI
-const int rssiSampleCount = 5;    // Number of samples in the rolling average
+const int rssiSampleCount = 4;    // Number of samples in the rolling average
 int rssiSamples[rssiSampleCount] = {0};
 int sampleIndex = 0;
 int sampleTotal = 0;
@@ -65,8 +71,27 @@ int sampleFilled = 0;
 
 void setup() {
   Serial.begin(115200);
-  
   while (!Serial);
+  
+  const esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = WDT_TIMEOUT * 1000,
+        .idle_core_mask = (1 << 0) | (1 << 1),
+        .trigger_panic = true
+  };
+  esp_task_wdt_init(&wdt_config);
+
+  esp_task_wdt_add(NULL);
+  Serial.println("WATCHDOG_LOOP_ENABLED");
+
+  xTaskCreatePinnedToCore(
+    watchdogTask,           // task function
+    "watchdogTask",         // name
+    4096,                   // stack size
+    NULL,                   // parameter
+    1,                      // priority
+    &watchdogTaskHandle,    // task handle
+    0                       // core 0 (low priority)
+  );
 
   // Start AP
   WiFi.softAP(apSSID, apPassword);
@@ -115,6 +140,8 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
+  esp_task_wdt_reset();
+
   webSocket.loop();
   server.handleClient();
 
@@ -124,6 +151,21 @@ void loop() {
     String received = "";
     while (LoRa.available()) received += (char)LoRa.read();
     received.trim();
+
+    // Filtrar basura
+    bool valid = true;
+    for (unsigned int i = 0; i < received.length(); i++) {
+      char c = received[i];
+      if ((c < 32 || c > 126) && c != '\n' && c != '\r') {
+        valid = false;
+        break;
+      }
+    }
+
+    if (!valid) {
+      Serial.println("NONSENSE_RECEIVED");
+      return;  // Descartar antes de actualizar RSSI
+    }
     
     // Obtener RSSI
     int rssi = LoRa.packetRssi();  // RSSI de mensaje entrante
@@ -139,16 +181,36 @@ void loop() {
     Serial.println("  RECV_ROVER_" + String(rssi) + "," + String(avgRssi) + "," + received);
 
     if (msgQueued && received.startsWith("ACK_")) {
-        String ackFor = received.substring(4);
-        if (ackFor == msgToSend) {
-            msgQueued = false;
-            msgToSend = "";
+      String ackFor = received.substring(4);
+      if (ackFor == msgToSend) {
+          msgQueued = false;
+          msgToSend = "";
 
-            if (ackFor == "SRA") LoRaShort();
-            if (ackFor == "MRA") LoRaMid();
-            if (ackFor == "LRA") LoRaLong();
-            if (receivingImage && ackFor.startsWith("REQ_")) lastChunkRequestTime = now;
-        }
+          if (ackFor == "SRA") LoRaShort();
+          if (ackFor == "MRA") LoRaMid();
+          if (ackFor == "LRA") LoRaLong();
+
+          if (receivingImage && ackFor.startsWith("REQ_")) lastChunkRequestTime = now;
+      }
+        
+      if (ackFor.startsWith("CK")) {
+        String lenStr = ackFor.substring(2);
+        int newlen = lenStr.toInt();
+        if (newlen > 0) expectedLength = newlen;
+        Serial.println("  SET_CHUNK_SIZE_" + String(expectedLength));
+      }
+
+      if (ackFor.startsWith("CSV_")) {
+        String lenStr = ackFor.substring(4);
+        float newInt = lenStr.toFloat();
+        if (newInt > 0) csvInt = newInt;
+      }
+
+      if (ackFor.startsWith("NEMA_")) {
+        String lenStr = ackFor.substring(5);
+        int newStep = lenStr.toInt();
+        if (newStep > 0) nemaStep = newStep;
+      }
     }
 
     // Cambio dinámico dependiendo de Thresholds
@@ -206,10 +268,7 @@ void loop() {
       if (receivingImage) {
         String chunkData = received.substring(2);
 
-        if (receivedChunks == expectedChunks - 1) expectedLength = -1;
-
-        bool lengthOK = (expectedLength == -1 && chunkData.length() <= 128) ||
-                        (chunkData.length() == expectedLength);
+        bool lastChunk = (receivedChunks == expectedChunks - 1);
 
         bool b64OK = true;
         for (int i = 0; i < chunkData.length(); i++) {
@@ -221,12 +280,14 @@ void loop() {
           }
         }
 
+        bool lengthOK = (lastChunk && chunkData.length() <= expectedLength) ||
+                        (chunkData.length() == expectedLength);
+
         if (lengthOK && b64OK) {
           imgBuffer += chunkData;
           receivedChunks++;
           Serial.printf("  RECV_CHUNK_%d/%d\n", receivedChunks, expectedChunks);
 
-          // Request next chunk
           if (receivedChunks < expectedChunks) {
             msgToSend = "REQ_" + String(receivedChunks + 1);
             msgQueued = true;
@@ -243,8 +304,9 @@ void loop() {
             webSocket.broadcastTXT("IMG_DONE");
           }
         } else {
-          Serial.printf("CHUNK_%d_INVALID(len=%d,b64=%s)_REREQ\n",
-                        receivedChunks + 1, chunkData.length(), b64OK ? "OK" : "FAIL");
+          Serial.printf("CHUNK_%d_INVALID(len=%d, b64=%s, last=%d)\n",
+                        receivedChunks + 1, chunkData.length(),
+                        b64OK ? "OK" : "FAIL", lastChunk);
           msgToSend = "REQ_" + String(receivedChunks + 1);
           msgQueued = true;
           lastSendAttempt = now;
@@ -301,6 +363,13 @@ void handleSerial() {
     if (serialInput.equalsIgnoreCase(".COMLIST")) {
       printCommandList();
     }
+
+    else if (serialInput.startsWith(".FREEZE")) {
+      Serial.println("FREEZING...");
+      while (true) {
+      }
+    }
+
     else if (serialInput.startsWith(".CHUNK")) {
       String setChunksStr = serialInput.substring(6);
       setChunksStr.trim();
@@ -359,6 +428,8 @@ void handleSerial() {
     else if (serialInput.equalsIgnoreCase(".LONG")) queueMessage("LRA");
     else if (serialInput.equalsIgnoreCase(".START")) queueMessage("GO");
     else if (serialInput.equalsIgnoreCase(".STOP")) queueMessage("STP");
+    else if (serialInput.equalsIgnoreCase(".RESET")) queueMessage("RES");
+    else if (serialInput.equalsIgnoreCase(".PARTY")) queueMessage("PARTY");
     else  {
       Serial.println("UNKNOWN_IGNORED");
     }
@@ -477,8 +548,8 @@ void LoRaShort() {
   LoRa.setCodingRate4(5);
   LoRa.setPreambleLength(6);
   delay(50);
-  retryInterval = 400;
-  ackTimeout = 2000;
+  retryInterval = 200;
+  ackTimeout = 1000;
   chunkTimeout = 2000;
   currentRange = SHORT;
 }
@@ -492,9 +563,9 @@ void LoRaMid() {
   LoRa.setCodingRate4(6);
   LoRa.setPreambleLength(8);
   delay(50);
-  retryInterval = 500;
-  ackTimeout = 5000;
-  chunkTimeout = 3000;
+  retryInterval = 750;
+  ackTimeout = 3000;
+  chunkTimeout = 4500;
   currentRange = MID;
 }
 
@@ -507,8 +578,8 @@ void LoRaLong() {
   LoRa.setCodingRate4(8);
   LoRa.setPreambleLength(10);
   delay(50);
-  retryInterval = 2000;
-  ackTimeout = 8000;
+  retryInterval = 1500;
+  ackTimeout = 6000;
   chunkTimeout = 5000;
   currentRange = LONG;
 }
@@ -540,4 +611,14 @@ void cancelImageTransfer() {
   msgToSend = "";
   Serial.println("IMAGE_TRANSFER_CANCELLED");
   webSocket.broadcastTXT("IMG_DONE");
+}
+
+void watchdogTask(void *parameter) {
+  esp_task_wdt_add(NULL);
+  Serial.println("WATCHDOG_TASK_ENABLED");
+
+  while (true) {
+    esp_task_wdt_reset();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 }
