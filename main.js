@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Telemetry handling ---
     const data = msg.split(',');
-    if (data.length === 24) {
+    if (data.length === 26) {
       document.getElementById('rssiCurr').textContent = data[0];
       document.getElementById('rssiAvg').textContent = data[1];
       document.getElementById('tempInt').textContent = (data[2] / 100).toFixed(2);
@@ -139,23 +139,61 @@ function updateControlState(currentController, myClientId) {
   }
 }
 
-  // --- Arrow buttons ---
+
+  // Telemetry buttons
+  document.getElementById('recvTel').addEventListener('click', () => sendCommand('START_TEL'));
+  document.getElementById('stopTel').addEventListener('click', () => sendCommand('STOP_TEL'));
+
+  // Arrow buttons
   document.getElementById('btnUp').addEventListener('click', () => sendCommand('UP'));
   document.getElementById('btnDown').addEventListener('click', () => sendCommand('DOWN'));
   document.getElementById('btnLeft').addEventListener('click', () => sendCommand('LEFT'));
   document.getElementById('btnRight').addEventListener('click', () => sendCommand('RIGHT'));
 
-  // --- Image buttons ---
+  // Image buttons
   document.getElementById('requestImage').addEventListener('click', () => sendCommand('WEB_IMG'));
   document.getElementById('captureImage').addEventListener('click', () => sendCommand('CAPTURE_IMG'));
   document.getElementById('cancelImage').addEventListener('click', () => sendCommand('CANCEL_IMG'));
 
-  // --- Telemetry buttons ---
-  document.getElementById('recvTel').addEventListener('click', () => sendCommand('START_TEL'));
-  document.getElementById('stopTel').addEventListener('click', () => sendCommand('STOP_TEL'));
+  // LoRa buttons
+  document.getElementById('startAuto').addEventListener('click', () => sendCommand('START_AUTO'));
+  document.getElementById('resumeAuto').addEventListener('click', () => sendCommand('RESUME_AUTO'));
+  document.getElementById('reverseAuto').addEventListener('click', () => sendCommand('REVERSE_AUTO'));
+  document.getElementById('stopAuto').addEventListener('click', () => sendCommand('STOP_AUTO'));
+  document.getElementById('pauseAuto').addEventListener('click', () => sendCommand('PAUSE_AUTO'));
+  document.getElementById('resetRover').addEventListener('click', () => sendCommand('RESET_ROVER'));
+  document.getElementById('clearMap').addEventListener('click', () => sendCommand('CLEAR_MAP'));
+  document.getElementById('clearAll').addEventListener('click', () => sendCommand('CLEAR_ALL'));
+  document.getElementById('party').addEventListener('click', () => sendCommand('PARTY_MODE'));
 
-  // --- LoRa buttons ---
+  // LoRa buttons
   document.getElementById('forceShort').addEventListener('click', () => sendCommand('LORA_SHORT'));
   document.getElementById('forceMid').addEventListener('click', () => sendCommand('LORA_MEDIUM'));
   document.getElementById('forceLong').addEventListener('click', () => sendCommand('LORA_LONG'));
+
+    // --- Command Inputs --- 
+  document.getElementById('setGoalBtn').addEventListener('click', () => {
+    const coords = document.getElementById('goalCoords').value.trim();
+    sendCommand(`GOAL_${coords}`);
+  });
+
+  document.getElementById('setObjBtn').addEventListener('click', () => {
+    const objCoords = document.getElementById('objectCoords').value.trim();
+    sendCommand(`OBJECT_${objCoords}`);
+  });
+
+  document.getElementById('setIntervalBtn').addEventListener('click', () => {
+    const interval = document.getElementById('intervalInput').value;
+    sendCommand(`CSV_${interval}`);
+  });
+
+  document.getElementById('setChunkBtn').addEventListener('click', () => {
+    const chunk = document.getElementById('chunkSize').value;
+    sendCommand(`CHUNK_${chunk}`);
+  });
+
+  document.getElementById('setStepBtn').addEventListener('click', () => {
+    const steps = document.getElementById('stepSize').value;
+    sendCommand(`STEP_${steps}`);
+  });
 });
