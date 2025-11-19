@@ -187,6 +187,46 @@ h2 {
   transform: scale(1.05);
 }
 
+  .command-button-movement {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;       /* center multiline text horizontally */
+  white-space: normal;      /* allow wrapping */
+  line-height: 1.2;         /* keep balanced spacing between lines */
+  padding: 1px;            /* smaller padding for better centering */
+  font-size: 1.2rem;
+  border: none;
+  border-radius: 15px;
+  border: 2px solid #000000;
+  background-color: #0077cc;
+  -webkit-text-stroke: 0.15px #000000;
+  color: white;
+  cursor: pointer;
+  width: 110px;
+  height: 110px;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  }
+
+.command-button-movement:hover { 
+  background-color: #005fa3;
+  transform: scale(1.05);
+}
+
+.rainbow {
+  animation: rainbowBG 8s linear infinite;
+  background-size: 400%;
+  background-image: linear-gradient(
+  90deg,
+    red, orange, yellow, green, cyan, blue, violet, red
+  );
+}
+
+@keyframes rainbowBG {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 400% 50%; }
+}
+
   .control-up { grid-area: up; }
   .control-down { grid-area: down; }
   .control-left { grid-area: left; }
@@ -346,7 +386,7 @@ h2 {
   .command-button-box,
   .command-inputs-box,
   .serial-monitor-box {
-    width: 90%;
+    width: 80%;
     max-width: none;
     height: auto;
     gap: 15px;
@@ -357,6 +397,19 @@ h2 {
     width: 120px;
     height: 120px;
     font-size: 1.2rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
+    padding: 10px;
+  }
+
+    .command-button-movement{
+    width: 80px;
+    height: 80px;
+    font-size: 0.8rem;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -457,6 +510,14 @@ h2 {
 
 <!-- Controls -->
 <div class="controls-container">
+
+  <div class="controls-box command-button-box">
+    <button id="recvTel" class="command-button" style="background-color: #28a7a5;">Recibir Telemetría</button>
+    <button id="stopTel" class="command-button" style="background-color: #28a7a5 ;">Detener Telemetría</button>
+    <button id="attemptC" class="command-button"style="background-color: green;">Aceptar Control</button>
+    <button id="releaseC" class="command-button"style="background-color: red;">Renunciar Control</button>
+  </div>
+
   <div class="controls-box arrow-buttons">
     <button id="btnUp" class="control-button control-up">↑</button>
     <button id="btnLeft" class="control-button control-left">←</button>
@@ -470,11 +531,53 @@ h2 {
     <button id="cancelImage" class="command-button" style="background-color: #28a745;">Cancelar Imagen</button>
   </div>
 
+<div class="command-inputs-box">
+  <div class="command-input-row">
+    <label for="goalInput">Coord. de Meta (X.Y)</label>
+    <div class="current-value-box" id="currGoal">0,0</div>
+    <input type="text" id="goalCoords" value="0">
+    <button id="setGoalBtn">Enviar</button>
+  </div>
+
+  <div class="command-input-row">
+    <label for="objectInput">Objetos Digitales (X.Y)</label>
+    <div class="current-value-box" id="currObj">0</div>
+    <input type="text" id="objectCoords" value="0">
+    <button id="setObjBtn">Enviar</button>
+  </div>
+
+    <div class="command-input-row">
+    <label for="intervalInput">Intervalo Telemetría (s):</label>
+    <div class="current-value-box" id="currInterval">1.5</div>
+    <input type="number" id="intervalInput" min="1" max="120" step="0.1" value="1">
+    <button id="setIntervalBtn">Enviar</button>
+  </div>
+
+  <div class="command-input-row">
+    <label for="speedInput">Tamaño de Chunks (B):</label>
+    <div class="current-value-box" id="currChunks">128</div>
+    <input type="number" id="chunkSize" min="1" max="200" step="1" value="128">
+    <button id="setChunkBtn">Enviar</button>
+  </div>
+
+  <div class="command-input-row">
+    <label for="stepInput">Pasos de Motor (6400/T):</label>
+    <div class="current-value-box" id="currSteps">3840</div>
+    <input type="number" id="stepSize" min="1" max="25600" value="3840">
+    <button id="setStepBtn">Enviar</button>
+  </div>
+</div>
+
   <div class="controls-box command-button-box">
-    <button id="recvTel" class="command-button" style="background-color: #28a7a5;">Recibir Telemetría</button>
-    <button id="stopTel" class="command-button" style="background-color: #28a7a5 ;">Detener Telemetría</button>
-    <button id="attemptC" class="command-button"style="background-color: green;">Aceptar Control</button>
-    <button id="releaseC" class="command-button"style="background-color: red;">Renunciar Control</button>
+    <button id="startAuto" class="command-button-movement" style="background-color: #28a7a5;">Iniciar Mov. Autónomo</button>
+    <button id="resumeAuto" class="command-button-movement" style="background-color: #28a7a5 ;">Reanudar Mov. Autónomo</button>
+    <button id="reverseAuto" class="command-button-movement" style="background-color: purple ;">Regresar a Origen</button>
+    <button id="stopAuto" class="command-button-movement"style="background-color: red;">Detener Mov. Autónomo</button>
+    <button id="pauseAuto" class="command-button-movement"style="background-color: red;">Pausar Mov. Autónomo</button>
+    <button id="resetRover" class="command-button-movement"style="background-color: red;">Reset: Eva </button>
+    <button id="clearMap" class="command-button-movement"style="background-color: orange;">Limpiar Mapa</button>
+    <button id="clearAll" class="command-button-movement"style="background-color: orange;">Limpiar Mapa y Pose </button>
+    <button id="party" class="command-button-movement rainbow">¡MODO FIESTA!</button>
   </div>
 
   <div class="controls-box command-button-box">
@@ -483,52 +586,13 @@ h2 {
     <button id="forceLong" class="command-button">-LoRa- <br> Largo Alcance</button>
   </div>
 
-<div class="command-inputs-box">
-  <div class="command-input-row">
-    <label for="intervalInput">Intervalo Telemetría (s):</label>
-    <div class="current-value-box" id="currInterval">1.0</div>
-    <input type="number" id="intervalInput" min="1" max="120" value="1">
-    <button id="setIntervalBtn">Enviar</button>
-  </div>
-
-  <div class="command-input-row">
-    <label for="speedInput">Tamaño de Chunks (B):</label>
-    <div class="current-value-box" id="currChunks">128</div>
-    <input type="number" id="chunkSize" min="1" max="200" value="128">
-    <button id="setSpeedBtn">Enviar</button>
-  </div>
-
-  <div class="command-input-row">
-    <label for="angleInput">Pasos de Motor (6400/T):</label>
-    <div class="current-value-box" id="currSteps">3840</div>
-    <input type="number" id="stepSize" min="1" max="12,800" value="3840">
-    <button id="setAngleBtn">Enviar</button>
-  </div>
-
-  <div class="command-input-row">
-    <label for="delayInput">PLACEHOLDER</label>
-    <div class="current-value-box" id="currPH1">1000</div>
-    <input type="number" id="PH1" min="0" max="5000" value="1000">
-    <button id="setDelayBtn">Enviar</button>
-  </div>
-
-  <div class="command-input-row">
-    <label for="gainInput">PLACEHOLDER</label>
-    <div class="current-value-box" id="currPH2">1000</div>
-    <input type="number" id="PH2" min="0" max="5000" value="1000">
-    <button id="setGainBtn">Enviar</button>
-  </div>
-
 </div>
+
+<div class="controls-line"></div>
 
   <div class="controls-box serial-monitor-box" id="serialMonitor">
     <!-- Messages will appear here dynamically -->
   </div>
-
-
-</div>
-
-<div class="controls-line"></div>
 
 <script>
   // Example: set Base64 image
