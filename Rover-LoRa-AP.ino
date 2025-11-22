@@ -4,9 +4,10 @@
 #include <WebSocketsServer.h>
 #include <WebServer.h>
 #include "esp_task_wdt.h"
+#include <LittleFS.h>
 #define LORA_FREQ 433E6
-#define LORA_SS   10    // CS
-#define LORA_DIO0 42   // DIO0
+#define LORA_SS   5    // CS
+#define LORA_DIO0 25   // DIO0
 #define WDT_TIMEOUT 10   // seconds
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// HTML embebido
@@ -72,6 +73,10 @@ int sampleFilled = 0;
 void setup() {
   Serial.begin(115200);
   while (!Serial);
+
+  if (!LittleFS.begin()) {
+    Serial.println("ERR_LittleFS");
+  }
   
   const esp_task_wdt_config_t wdt_config = {
         .timeout_ms = WDT_TIMEOUT * 1000,
@@ -94,6 +99,7 @@ void setup() {
   );
 
   // Start AP
+  esp_log_level_set("wifi", ESP_LOG_NONE);
   WiFi.softAP(apSSID, apPassword);
   IPAddress IP = WiFi.softAPIP();
   Serial.print("\nConectar a Dashboard: http://");
@@ -108,6 +114,17 @@ void setup() {
   server.on("/main.js", HTTP_GET, []() {
     server.send_P(200, "application/javascript", main_js);
   });
+
+  server.on("/chart.umd.min.js", HTTP_GET, []() {
+    File file = LittleFS.open("/chart.umd.min.js", "r");
+    if (!file) {
+      server.send(404, "text/plain", "chart.umd.min.js not found");
+      return;
+    }
+    server.streamFile(file, "application/javascript");
+    file.close();
+  });
+
 
   server.begin();
 
@@ -261,6 +278,10 @@ void loop() {
     else if (received.indexOf(',') != -1) {
       String webTelemetry = String(rssi) + "," + String(avgRssi) + "," + received;
       webSocket.broadcastTXT(webTelemetry);
+    }
+
+    else if (received.startsWith("M,")) {
+      webSocket.broadcastTXT(received);
     }
 
     // Handle chunk data
@@ -427,7 +448,44 @@ void handleSerial() {
     else if (serialInput.equalsIgnoreCase(".MID")) queueMessage("MRA");
     else if (serialInput.equalsIgnoreCase(".LONG")) queueMessage("LRA");
     else if (serialInput.equalsIgnoreCase(".START")) queueMessage("GO");
+    else if (serialInput.equalsIgnoreCase(".GO")) queueMessage("GO");
     else if (serialInput.equalsIgnoreCase(".STOP")) queueMessage("STP");
+
+    else if (serialInput.startsWith(".OBJ")) {
+      String params = serialInput.substring(4);
+      params.trim();
+      int sp = params.indexOf(' ');
+      if (sp > 0) {
+        String xStr = params.substring(0, sp);
+        String yStr = params.substring(sp + 1);
+        xStr.trim();
+        yStr.trim();
+        queueMessage("OBJ" + xStr + "," + yStr);
+      } else {
+        Serial.println("ERROR_OBJ_FORMAT");
+      }
+    }
+    else if (serialInput.startsWith(".GOAL")) {
+      String params = serialInput.substring(5);
+      params.trim();
+      int sp = params.indexOf(' ');
+      if (sp > 0) {
+        String xStr = params.substring(0, sp);
+        String yStr = params.substring(sp + 1);
+        xStr.trim();
+        yStr.trim();
+        queueMessage("GOAL" + xStr + "," + yStr);
+      } else {
+        Serial.println("ERROR_GOAL_FORMAT");
+      }
+    }
+    else if (serialInput.equalsIgnoreCase(".AUTO")) queueMessage("AUTO");
+    else if (serialInput.equalsIgnoreCase(".STOPAUTO")) queueMessage("STOPAUTO");
+    else if (serialInput.equalsIgnoreCase(".PAUSE")) queueMessage("PAUSE");
+    else if (serialInput.equalsIgnoreCase(".RESUME")) queueMessage("RESUME");
+    else if (serialInput.equalsIgnoreCase(".REVERSE")) queueMessage("REVERSE");
+    else if (serialInput.equalsIgnoreCase(".CLEAR")) queueMessage("CLEAR");
+    else if (serialInput.equalsIgnoreCase(".CLEARALL")) queueMessage("CLEARALL");
     else if (serialInput.equalsIgnoreCase(".RESET")) queueMessage("RES");
     else if (serialInput.equalsIgnoreCase(".PARTY")) queueMessage("PARTY");
     else  {
@@ -525,6 +583,78 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
         else if (msg == "CANCEL_IMG") cancelImageTransfer();
         else if (msg == "START_TEL") queueMessage("GO");
         else if (msg == "STOP_TEL") queueMessage("STP");
+        else if (msg.startsWith("OBJ")) {
+          String params = msg.substring(3);
+          params.trim();
+          queueMessage("OBJ" + params);
+        }
+        else if (msg.startsWith("GOAL")) {
+          String params = msg.substring(4);
+          params.trim();
+          queueMessage("GOAL" + params);
+        }
+
+        // GOAL_X,Y
+        else if (msg.startsWith("GOAL_")) {
+          String params = msg.substring(5);
+          params.trim();
+
+          int sep = params.indexOf(',');
+          if (sep > 0) {
+            String xGoal = params.substring(0, sep);
+            String yGoal = params.substring(sep + 1);
+            queueMessage("GOAL" + xGoal + "," + yGoal);
+          }
+          return;
+        }
+
+        // OBJECT_X,Y
+        else if (msg.startsWith("OBJECT_")) {
+          String params = msg.substring(7);  // after "OBJECT_"
+          params.trim();
+
+          int sep = params.indexOf(',');
+          if (sep > 0) {
+            String xObj = params.substring(0, sep);
+            String yObj = params.substring(sep + 1);
+            queueMessage("OBJ" + xObj + "," + yObj);
+          }
+          return;
+        }
+
+        else if (msg.startsWith("CSV_")) {
+          String intervalInput = msg.substring(4);
+          intervalInput.trim();
+          queueMessage("INT" + intervalInput);
+          return;
+        }
+        
+        // CHUNK_size
+        else if (msg.startsWith("CHUNK_")) {
+          String chunkSize = msg.substring(6);
+          chunkSize.trim();
+          queueMessage("CK" + chunkSize);
+          return;
+        }
+
+        // STEP_size
+        else if (msg.startsWith("STEP_")) {
+          String stepSize = msg.substring(5);
+          stepSize.trim();
+          queueMessage("SET" + stepSize);
+          return;
+        }
+
+        else if (msg == "START_AUTO") queueMessage("AUTO");
+        else if (msg == "STOP_AUTO") queueMessage("STOPAUTO");
+        else if (msg == "PAUSE_AUTO") queueMessage("PAUSE");
+        else if (msg == "RESUME_AUTO") queueMessage("RESUME");
+        else if (msg == "REVERSE_AUTO") queueMessage("REVERSE");
+        else if (msg == "CLEAR_MAP") queueMessage("CLEAR");
+        else if (msg == "CLEAR_ALL") queueMessage("CLEARALL");
+        else if (msg == "RESET_ROVER") queueMessage("RES");
+        else if (msg == "PARTY_MODE") queueMessage("PARTY");
+
         else if (msg == "LORA_SHORT") LoRaShort();
         else if (msg == "LORA_MEDIUM") LoRaMid();
         else if (msg == "LORA_LONG") LoRaLong();
@@ -593,12 +723,18 @@ void printCommandList() {
   Serial.println("    '.STEP#'        : Elegir cantidad de Steps (1/32: 6400/Vuelta)");
   Serial.println("    '.INTERVAL#'    : Elegir intervalo de CSV");
   Serial.println("    '.FORCE###'     : Cambiar configuración LoRa: SHORT, MID, LONG");
-  Serial.println("    '.CALCULATE'    : Calcula la ruta");
-  Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
-  Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
-  Serial.println("    '.SHOW'         : Muestra la ruta calculada");
-  Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
-  Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
+  Serial.println("    '.GO' / '.START': Inicia envío de telemetría");
+  Serial.println("    '.STOP'         : Detiene envío de telemetría");
+  Serial.println("    '.AUTO'         : Inicia modo autónomo");
+  Serial.println("    '.STOPAUTO'     : Detiene modo autónomo");
+  Serial.println("    '.GOAL X Y'     : Establece objetivo en coordenadas X,Y");
+  Serial.println("    '.OBJ X Y'      : Marca obstáculo en coordenadas X,Y");
+  Serial.println("    '.PAUSE'        : Pausa modo autónomo");
+  Serial.println("    '.RESUME'       : Reanuda modo autónomo");
+  Serial.println("    '.REVERSE'      : Establece objetivo en (0,0)");
+  Serial.println("    '.CLEAR'        : Limpia mapa manteniendo pose");
+  Serial.println("    '.CLEARALL'     : Limpia mapa y resetea pose");
+  Serial.println("    '.RESET'        : Resetear Rover - EVA");
 }
 
 void cancelImageTransfer() {
@@ -617,7 +753,7 @@ void watchdogTask(void *parameter) {
   esp_task_wdt_add(NULL);
   Serial.println("WATCHDOG_TASK_ENABLED");
 
-  while (true) {
+ while (true) {
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
