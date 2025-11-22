@@ -2,38 +2,184 @@ document.addEventListener('DOMContentLoaded', () => {
   const ws = new WebSocket('ws://192.168.4.1:81');
 
   let myClientId = null;
-  let currentController = 255; // 255 = none
+  let currentController = 255;
 
   const attemptC = document.getElementById('attemptC');
   const releaseC = document.getElementById('releaseC');
   const buttons = document.querySelectorAll('button');
   const cancelImage = document.getElementById('cancelImage');
 
-  // --- WebSocket Events ---
+  // ---------------------------------------------------------------------------
+  // TEL BUFFERS FOR CHARTS
+
+  const telemetry = {
+    rssiCurr: [], rssiAvg: [],
+    tempInt: [], tempExt: [],
+    humInt: [], humExt: [],
+    voltEsp: [], currEsp: [], powEsp: [],
+    voltM1: [], currM1: [], powM1: [],
+    voltM2: [], currM2: [], powM2: [],
+    accX: [], accY: [], accZ: [],
+    angX: [], angY: [], angZ: [],
+    dist1: [], dist2: [], dist3: []
+  };
+
+  function appendTelemetry(arr, val) {
+    arr.push(val);
+    if (arr.length > 20) arr.shift();
+  }
+
+  // ---------------------------------------------------------------------------
+  // CHART MANAGEMENT
+
+  const activeCharts = {
+    chartBoxRSSI: null,
+    chartBoxTEMP: null,
+    chartBoxPOWER: null,
+    chartBoxGYRO: null,
+    chartBoxDIST: null
+  };
+
+  function createChart(canvasId, label, dataArray) {
+    const ctx = document.getElementById(canvasId);
+
+    return new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: Array(dataArray.length).fill(""),
+        datasets: [{
+          label: label,
+          data: dataArray,
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        scales: { x: { display: false } }
+      }
+    });
+  }
+
+  function refreshVisibleCharts() {
+    Object.values(activeCharts).forEach(chart => {
+      if (chart) {
+        chart.data.labels = Array(chart.data.datasets[0].data.length).fill("");
+        chart.update();
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // CHART DROPDOWN
+
+  document.querySelectorAll(".chart-select").forEach(select => {
+    select.addEventListener("change", () => {
+      const telemetryKey = select.value;
+      const canvas = select.nextElementSibling;
+      const canvasId = canvas.id;
+
+      if (activeCharts[canvasId])
+        activeCharts[canvasId].destroy();
+
+      activeCharts[canvasId] =
+        createChart(canvasId, telemetryKey, telemetry[telemetryKey]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // AUTO START CHARTS
+
+  window.addEventListener("load", () => {
+    document.querySelectorAll(".chart-select").forEach(select => {
+      const telemetryKey = select.value;
+      const canvasId = select.nextElementSibling.id;
+
+      activeCharts[canvasId] =
+        createChart(canvasId, telemetryKey, telemetry[telemetryKey]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // WEBSOCKET
+
   ws.onopen = () => {
     console.log("WebSocket connected");
-    ws.send("HELLO_" + myClientId); // Let the ESP know your ID
+    ws.send("HELLO_" + myClientId);
   };
+
+  // ---------------------------------------------------------------------------
+  // UPDATE GRID
+  function updateGridFromMessage(msg) {
+    // msg = "M,0000000000,0000000000,..."
+    const parts = msg.split(",");
+    parts.shift(); // remove "M"
+
+    if (parts.length !== 10) return; // safety
+
+    // parts[0] is bottom row, parts[9] is top row
+    // But our grid is cell-0 at TOP LEFT
+    // So we reverse the rows to map correctly.
+    const rowsFromBottom = parts.reverse();
+
+    for (let row = 0; row < 10; row++) {
+      const rowStr = rowsFromBottom[row]; // e.g. "0012000345"
+
+      for (let col = 0; col < 10; col++) {
+        const val = rowStr[col];
+        const index = row * 10 + col;
+        const cell = document.getElementById("cell-" + index);
+
+        // Reset cell
+        cell.style.backgroundColor = "gray";
+        cell.textContent = "";
+
+        if (val === "0") {
+          // empty (do nothing)
+        }
+        else if (val === "1") {
+          cell.style.backgroundColor = "red";
+        }
+        else if (val === "2") {
+          cell.textContent = "↑";
+          cell.style.backgroundColor = "blue";
+        }
+        else if (val === "3") {
+          cell.textContent = "→";
+          cell.style.backgroundColor = "blue";
+        }
+        else if (val === "4") {
+          cell.textContent = "←";
+          cell.style.backgroundColor = "blue";
+        }
+        else if (val === "5") {
+          cell.textContent = "↓";
+          cell.style.backgroundColor = "blue";
+        }
+      }
+    }
+  }
+
 
   ws.onmessage = (event) => {
     const msg = event.data;
     console.log("Message received:", msg);
 
+    // ---- ID assignment ----
     if (msg.startsWith("ASSIGN_ID_")) {
-    myClientId = parseInt(msg.split("_")[2]);
-    console.log("Assigned client ID:", myClientId);
-    return;
+      myClientId = parseInt(msg.split("_")[2]);
+      return;
     }
 
-    // --- Control state update ---
+    // ---- Control state ----
     if (msg.startsWith("CTRL_")) {
       currentController = parseInt(msg.split("_")[1]);
       updateControlState(currentController, myClientId);
       return;
     }
 
+    // ---- Image lockout ----
     if (msg === "IMG_START") {
-    // Disable all buttons except control ones
       buttons.forEach(btn => {
         if (btn !== attemptC && btn !== releaseC && btn !== cancelImage) {
           btn.classList.add("gray");
@@ -44,7 +190,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (msg === "IMG_DONE") {
-      // Re-enable all buttons except control ones
       buttons.forEach(btn => {
         if (btn !== attemptC && btn !== releaseC && btn !== cancelImage) {
           btn.classList.remove("gray");
@@ -54,146 +199,169 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // --- Image handling ---
+    // ---- Image frame ----
     if (msg.startsWith("IMG_")) {
       const b64 = msg.substring(4);
-      document.getElementById('camImage').src = "data:image/jpeg;base64," + b64;
+      document.getElementById('camImage').src =
+        "data:image/jpeg;base64," + b64;
       return;
     }
 
-    // --- Telemetry handling ---
-    const data = msg.split(',');
-    if (data.length === 26) {
-      document.getElementById('rssiCurr').textContent = data[0];
-      document.getElementById('rssiAvg').textContent = data[1];
-      document.getElementById('tempInt').textContent = (data[2] / 100).toFixed(2);
-      document.getElementById('humInt').textContent = (data[3] / 100).toFixed(2);
-      document.getElementById('tempExt').textContent = (data[4] / 100).toFixed(2);
-      document.getElementById('humExt').textContent = (data[5] / 100).toFixed(2);
+    // ---- GRID UPDATE ----
+    if (msg.startsWith("M,")) {
+        updateGridFromMessage(msg);
+        return;
+    }
 
-      document.getElementById('voltEsp').textContent = (data[6] / 100).toFixed(2);
-      document.getElementById('currEsp').textContent = (data[7] / 10).toFixed(1);
-      document.getElementById('powEsp').textContent = data[8];
+    // -----------------------------------------------------------------------
+    // TEL PARSING
 
-      document.getElementById('voltM1').textContent = (data[9] / 100).toFixed(2);
-      document.getElementById('currM1').textContent = (data[10] / 10).toFixed(2);
-      document.getElementById('powM1').textContent = data[11];
+    const dt = msg.split(',');
 
-      document.getElementById('voltM2').textContent = (data[12] / 100).toFixed(2);
-      document.getElementById('currM2').textContent = (data[13] / 10).toFixed(1);
-      document.getElementById('powM2').textContent = data[14];
+    if (dt.length === 24) {
 
-      document.getElementById('accX').textContent = (data[15] / 100).toFixed(2);
-      document.getElementById('accY').textContent = (data[16] / 100).toFixed(2);
-      document.getElementById('accZ').textContent = (data[17] / 100).toFixed(2);
+      // --- Update on-screen text ---
+      document.getElementById('rssiCurr').textContent = dt[0];
+      document.getElementById('rssiAvg').textContent = dt[1];
+      document.getElementById('tempInt').textContent = (dt[2] / 100).toFixed(2);
+      document.getElementById('humInt').textContent = (dt[3] / 100).toFixed(2);
+      document.getElementById('tempExt').textContent = (dt[4] / 100).toFixed(2);
+      document.getElementById('humExt').textContent = (dt[5] / 100).toFixed(2);
+      document.getElementById('voltEsp').textContent = (dt[6] / 100).toFixed(2);
+      document.getElementById('currEsp').textContent = (dt[7] / 10).toFixed(1);
+      document.getElementById('powEsp').textContent = dt[8];
+      document.getElementById('voltM1').textContent = (dt[9] / 100).toFixed(2);
+      document.getElementById('currM1').textContent = (dt[10] / 10).toFixed(1);
+      document.getElementById('powM1').textContent = dt[11];
+      document.getElementById('voltM2').textContent = (dt[12] / 100).toFixed(2);
+      document.getElementById('currM2').textContent = (dt[13] / 10).toFixed(1);
+      document.getElementById('powM2').textContent = dt[14];
+      document.getElementById('accX').textContent = (dt[15] / 100).toFixed(2);
+      document.getElementById('accY').textContent = (dt[16] / 100).toFixed(2);
+      document.getElementById('accZ').textContent = (dt[17] / 100).toFixed(2);
+      document.getElementById('angX').textContent = (dt[18] / 100).toFixed(2);
+      document.getElementById('angY').textContent = (dt[19] / 100).toFixed(2);
+      document.getElementById('angZ').textContent = (dt[20] / 100).toFixed(2);
+      document.getElementById('dist1').textContent = dt[21];
+      document.getElementById('dist2').textContent = dt[22];
+      document.getElementById('dist3').textContent = dt[23];
 
-      document.getElementById('angX').textContent = (data[18] / 100).toFixed(2);
-      document.getElementById('angY').textContent = (data[19] / 100).toFixed(2);
-      document.getElementById('angZ').textContent = (data[20] / 100).toFixed(2);
+      // --- Add to graph buffers ---
+      appendTelemetry(telemetry.rssiCurr, parseInt(dt[0]));
+      appendTelemetry(telemetry.rssiAvg, parseInt(dt[1]));
+      appendTelemetry(telemetry.tempInt, dt[2] / 100);
+      appendTelemetry(telemetry.humInt, dt[3] / 100);
+      appendTelemetry(telemetry.tempExt, dt[4] / 100);
+      appendTelemetry(telemetry.humExt, dt[5] / 100);
+      appendTelemetry(telemetry.voltEsp, dt[6] / 100);
+      appendTelemetry(telemetry.currEsp, dt[7] / 10);
+      appendTelemetry(telemetry.powEsp, dt[8]);
+      appendTelemetry(telemetry.voltM1, dt[9] / 100);
+      appendTelemetry(telemetry.currM1, dt[10] / 10);
+      appendTelemetry(telemetry.powM1, dt[11]);
+      appendTelemetry(telemetry.voltM2, dt[12] / 100);
+      appendTelemetry(telemetry.currM2, dt[13] / 10);
+      appendTelemetry(telemetry.powM2, dt[14]);
+      appendTelemetry(telemetry.accX, dt[15] / 100);
+      appendTelemetry(telemetry.accY, dt[16] / 100);
+      appendTelemetry(telemetry.accZ, dt[17] / 100);
+      appendTelemetry(telemetry.angX, dt[18] / 100);
+      appendTelemetry(telemetry.angY, dt[19] / 100);
+      appendTelemetry(telemetry.angZ, dt[20] / 100);
+      appendTelemetry(telemetry.dist1, parseInt(dt[21]));
+      appendTelemetry(telemetry.dist2, parseInt(dt[22]));
+      appendTelemetry(telemetry.dist3, parseInt(dt[23]));
 
-      document.getElementById('dist1').textContent = data[21];
-      document.getElementById('dist2').textContent = data[22];
-      document.getElementById('dist3').textContent = data[23];
+      // --- Update visible charts ---
+      refreshVisibleCharts();
     }
   };
 
-  // --- Send commands ---
+  // ---------------------------------------------------------------------------
+  // SENDING COMMAND FUNCTION
+
   function sendCommand(cmd) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(cmd);
-      console.log("Command sent:", cmd);
-    } else {
-      console.warn("WebSocket not open, cannot send:", cmd);
     }
   }
 
-  // --- Control buttons behavior ---
-// Buttons keep their default colors (green/red) in HTML
-attemptC.onclick = () => sendCommand("REQUEST_CONTROL");
-releaseC.onclick = () => sendCommand("RELEASE_CONTROL");
+  // ---------------------------------------------------------------------------
+  // CONTROL LOGIC
 
-function updateControlState(currentController, myClientId) {
-  // Reset both buttons first
-  attemptC.classList.remove("gray");
-  releaseC.classList.remove("gray");
+  attemptC.onclick = () => sendCommand("REQUEST_CONTROL");
+  releaseC.onclick = () => sendCommand("RELEASE_CONTROL");
 
-  attemptC.disabled = false;
-  releaseC.disabled = false;
+  function updateControlState(currentController, myClientId) {
+    attemptC.classList.remove("gray");
+    releaseC.classList.remove("gray");
+    attemptC.disabled = false;
+    releaseC.disabled = false;
 
-  if (currentController === myClientId) {
-    // You have control
-    attemptC.classList.add("gray"); // Can't request control again
-    attemptC.disabled = true;
-    // Release button stays red and active
-  } else if (currentController === 255) {
-    // No one has control
-    // Attempt button stays green and active
-    releaseC.classList.add("gray"); // Can't release if no one has control
-    releaseC.disabled = true;
-  } else {
-    // Someone else has control
-    attemptC.classList.add("gray");
-    releaseC.classList.add("gray");
-    attemptC.disabled = true;
-    releaseC.disabled = true;
+    if (currentController === myClientId) {
+      attemptC.classList.add("gray");
+      attemptC.disabled = true;
+    } 
+    else if (currentController === 255) {
+      releaseC.classList.add("gray");
+      releaseC.disabled = true;
+    } 
+    else {
+      attemptC.classList.add("gray");
+      releaseC.classList.add("gray");
+      attemptC.disabled = true;
+      releaseC.disabled = true;
+    }
   }
-}
 
+  // ---------------------------------------------------------------------------
+  // BUTTON BINDS
 
-  // Telemetry buttons
-  document.getElementById('recvTel').addEventListener('click', () => sendCommand('START_TEL'));
-  document.getElementById('stopTel').addEventListener('click', () => sendCommand('STOP_TEL'));
+  document.getElementById('recvTel').onclick = () => sendCommand('START_TEL');
+  document.getElementById('stopTel').onclick = () => sendCommand('STOP_TEL');
 
-  // Arrow buttons
-  document.getElementById('btnUp').addEventListener('click', () => sendCommand('UP'));
-  document.getElementById('btnDown').addEventListener('click', () => sendCommand('DOWN'));
-  document.getElementById('btnLeft').addEventListener('click', () => sendCommand('LEFT'));
-  document.getElementById('btnRight').addEventListener('click', () => sendCommand('RIGHT'));
+  document.getElementById('btnUp').onclick = () => sendCommand('UP');
+  document.getElementById('btnDown').onclick = () => sendCommand('DOWN');
+  document.getElementById('btnLeft').onclick = () => sendCommand('LEFT');
+  document.getElementById('btnRight').onclick = () => sendCommand('RIGHT');
 
-  // Image buttons
-  document.getElementById('requestImage').addEventListener('click', () => sendCommand('WEB_IMG'));
-  document.getElementById('captureImage').addEventListener('click', () => sendCommand('CAPTURE_IMG'));
-  document.getElementById('cancelImage').addEventListener('click', () => sendCommand('CANCEL_IMG'));
+  document.getElementById('requestImage').onclick = () => sendCommand('WEB_IMG');
+  document.getElementById('captureImage').onclick = () => sendCommand('CAPTURE_IMG');
+  document.getElementById('cancelImage').onclick = () => sendCommand('CANCEL_IMG');
 
-  // LoRa buttons
-  document.getElementById('startAuto').addEventListener('click', () => sendCommand('START_AUTO'));
-  document.getElementById('resumeAuto').addEventListener('click', () => sendCommand('RESUME_AUTO'));
-  document.getElementById('reverseAuto').addEventListener('click', () => sendCommand('REVERSE_AUTO'));
-  document.getElementById('stopAuto').addEventListener('click', () => sendCommand('STOP_AUTO'));
-  document.getElementById('pauseAuto').addEventListener('click', () => sendCommand('PAUSE_AUTO'));
-  document.getElementById('resetRover').addEventListener('click', () => sendCommand('RESET_ROVER'));
-  document.getElementById('clearMap').addEventListener('click', () => sendCommand('CLEAR_MAP'));
-  document.getElementById('clearAll').addEventListener('click', () => sendCommand('CLEAR_ALL'));
-  document.getElementById('party').addEventListener('click', () => sendCommand('PARTY_MODE'));
+  document.getElementById('startAuto').onclick = () => sendCommand('START_AUTO');
+  document.getElementById('resumeAuto').onclick = () => sendCommand('RESUME_AUTO');
+  document.getElementById('reverseAuto').onclick = () => sendCommand('REVERSE_AUTO');
+  document.getElementById('stopAuto').onclick = () => sendCommand('STOP_AUTO');
+  document.getElementById('pauseAuto').onclick = () => sendCommand('PAUSE_AUTO');
+  document.getElementById('resetRover').onclick = () => sendCommand('RESET_ROVER');
+  document.getElementById('clearMap').onclick = () => sendCommand('CLEAR_MAP');
+  document.getElementById('clearAll').onclick = () => sendCommand('CLEAR_ALL');
+  document.getElementById('party').onclick = () => sendCommand('PARTY_MODE');
+  document.getElementById('forceShort').onclick = () => sendCommand('LORA_SHORT');
+  document.getElementById('forceMid').onclick = () => sendCommand('LORA_MEDIUM');
+  document.getElementById('forceLong').onclick = () => sendCommand('LORA_LONG');
 
-  // LoRa buttons
-  document.getElementById('forceShort').addEventListener('click', () => sendCommand('LORA_SHORT'));
-  document.getElementById('forceMid').addEventListener('click', () => sendCommand('LORA_MEDIUM'));
-  document.getElementById('forceLong').addEventListener('click', () => sendCommand('LORA_LONG'));
-
-    // --- Command Inputs --- 
-  document.getElementById('setGoalBtn').addEventListener('click', () => {
-    const coords = document.getElementById('goalCoords').value.trim();
+  document.getElementById('setGoalBtn').onclick = () => {
+    const coords = goalCoords.value.trim();
     sendCommand(`GOAL_${coords}`);
-  });
+  };
 
-  document.getElementById('setObjBtn').addEventListener('click', () => {
-    const objCoords = document.getElementById('objectCoords').value.trim();
-    sendCommand(`OBJECT_${objCoords}`);
-  });
+  document.getElementById('setObjBtn').onclick = () => {
+    const coords = objectCoords.value.trim();
+    sendCommand(`OBJECT_${coords}`);
+  };
 
-  document.getElementById('setIntervalBtn').addEventListener('click', () => {
-    const interval = document.getElementById('intervalInput').value;
-    sendCommand(`CSV_${interval}`);
-  });
+  document.getElementById('setIntervalBtn').onclick = () => {
+    sendCommand(`CSV_${intervalInput.value}`);
+  };
 
-  document.getElementById('setChunkBtn').addEventListener('click', () => {
-    const chunk = document.getElementById('chunkSize').value;
-    sendCommand(`CHUNK_${chunk}`);
-  });
+  document.getElementById('setChunkBtn').onclick = () => {
+    sendCommand(`CHUNK_${chunkSize.value}`);
+  };
 
-  document.getElementById('setStepBtn').addEventListener('click', () => {
-    const steps = document.getElementById('stepSize').value;
-    sendCommand(`STEP_${steps}`);
-  });
+  document.getElementById('setStepBtn').onclick = () => {
+    sendCommand(`STEP_${stepSize.value}`);
+  };
+
 });
