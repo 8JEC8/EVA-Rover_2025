@@ -6,8 +6,8 @@
 #include "esp_task_wdt.h"
 #include <LittleFS.h>
 #define LORA_FREQ 433E6
-#define LORA_SS   5    // CS
-#define LORA_DIO0 25   // DIO0
+#define LORA_SS   10    // CS
+#define LORA_DIO0 42   // DIO0
 #define WDT_TIMEOUT 10   // seconds
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// HTML embebido
@@ -52,6 +52,7 @@ unsigned long lastChunkRequestTime = 0;
 int expectedLength = 128;
 float csvInt = 1.5;
 int nemaStep = 6400;
+String currGoal = "";
 
 // Estados LoRa
 enum LoRaRange { SHORT, MID, LONG };
@@ -204,29 +205,41 @@ void loop() {
           msgToSend = "";
 
           if (ackFor == "SRA") LoRaShort();
-          if (ackFor == "MRA") LoRaMid();
-          if (ackFor == "LRA") LoRaLong();
+          else if (ackFor == "MRA") LoRaMid();
+          else if (ackFor == "LRA") LoRaLong();
 
-          if (receivingImage && ackFor.startsWith("REQ_")) lastChunkRequestTime = now;
+          else if (receivingImage && ackFor.startsWith("REQ_")) lastChunkRequestTime = now;
       }
         
       if (ackFor.startsWith("CK")) {
-        String lenStr = ackFor.substring(2);
-        int newlen = lenStr.toInt();
+        String lenCK = ackFor.substring(2);
+        int newlen = lenCK.toInt();
         if (newlen > 0) expectedLength = newlen;
         Serial.println("  SET_CHUNK_SIZE_" + String(expectedLength));
+        webSocket.broadcastTXT("CK_" + String(expectedLength));
       }
 
-      if (ackFor.startsWith("CSV_")) {
-        String lenStr = ackFor.substring(4);
-        float newInt = lenStr.toFloat();
+      else if (ackFor.startsWith("INT")) {
+        String lenINT = ackFor.substring(3);
+        float newInt = lenINT.toFloat();
         if (newInt > 0) csvInt = newInt;
+        Serial.println("  SET_CSV_INTERVAL_" + String(csvInt));
+        webSocket.broadcastTXT("CSVINT_" + String(csvInt));
       }
 
-      if (ackFor.startsWith("NEMA_")) {
-        String lenStr = ackFor.substring(5);
-        int newStep = lenStr.toInt();
+      else if (ackFor.startsWith("SET")) {
+        String lenSTEP = ackFor.substring(3);
+        int newStep = lenSTEP.toInt();
         if (newStep > 0) nemaStep = newStep;
+        Serial.println("  SET_STEP_SIZE_" + String(nemaStep));
+        webSocket.broadcastTXT("NEMA_" + String(nemaStep));
+      }
+
+      else if (ackFor.startsWith("GOAL")) {
+        String lenGOAL = ackFor.substring(4);
+        currGoal = lenGOAL;
+        Serial.println("  GOAL_UPDATED" + String(currGoal));
+        webSocket.broadcastTXT("GOAL_" + String(currGoal));
       }
     }
 
@@ -275,13 +288,13 @@ void loop() {
       lastChunkRequestTime = now;
     }
 
+    else if (received.startsWith("M,")) {
+      webSocket.broadcastTXT(received);
+    }
+
     else if (received.indexOf(',') != -1) {
       String webTelemetry = String(rssi) + "," + String(avgRssi) + "," + received;
       webSocket.broadcastTXT(webTelemetry);
-    }
-
-    else if (received.startsWith("M,")) {
-      webSocket.broadcastTXT(received);
     }
 
     // Handle chunk data
@@ -450,6 +463,7 @@ void handleSerial() {
     else if (serialInput.equalsIgnoreCase(".START")) queueMessage("GO");
     else if (serialInput.equalsIgnoreCase(".GO")) queueMessage("GO");
     else if (serialInput.equalsIgnoreCase(".STOP")) queueMessage("STP");
+    else if (serialInput.equalsIgnoreCase(".NOSTEP")) queueMessage(".NOSTEP");
 
     else if (serialInput.startsWith(".OBJ")) {
       String params = serialInput.substring(4);
@@ -583,16 +597,6 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
         else if (msg == "CANCEL_IMG") cancelImageTransfer();
         else if (msg == "START_TEL") queueMessage("GO");
         else if (msg == "STOP_TEL") queueMessage("STP");
-        else if (msg.startsWith("OBJ")) {
-          String params = msg.substring(3);
-          params.trim();
-          queueMessage("OBJ" + params);
-        }
-        else if (msg.startsWith("GOAL")) {
-          String params = msg.substring(4);
-          params.trim();
-          queueMessage("GOAL" + params);
-        }
 
         // GOAL_X,Y
         else if (msg.startsWith("GOAL_")) {
