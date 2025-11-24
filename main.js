@@ -1,4 +1,24 @@
 document.addEventListener('DOMContentLoaded', () => {
+  // ---------------------------------------------------------------------------
+  // GRID SETUP
+  const rows = 10;
+  const cols = 10;
+
+  const grid = document.getElementById("grid");
+
+  // Generar celdas dinámicas
+  for (let i = 0; i < rows * cols; i++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.id = "cell-" + i;
+      grid.appendChild(cell);
+  }
+
+  // ---------------------------------------------------------------------------
+  // // BASE64 IMAGE
+  const base64String = "";
+  document.getElementById('camImage').src = "data:image/jpeg;base64," + base64String;
+  
   const ws = new WebSocket('ws://192.168.4.1:81');
 
   let myClientId = null;
@@ -213,6 +233,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
+    // Chunk size update
+    if (msg.startsWith("CK_")) {
+        const newChunks = parseInt(msg.substring(3));
+        if (!isNaN(newChunks)) {
+            document.getElementById("currChunks").textContent = newChunks;
+        }
+        return;
+    }
+
+    // NEMA step update
+    if (msg.startsWith("NEMA_")) {
+        const newSteps = parseInt(msg.substring(5));
+        if (!isNaN(newSteps)) {
+            document.getElementById("currSteps").textContent = newSteps;
+        }
+        return;
+    }
+
+    // CSV interval update
+    if (msg.startsWith("CSVINT_")) {
+        const newInterval = parseFloat(msg.substring(7));
+        if (!isNaN(newInterval)) {
+            document.getElementById("currInterval").textContent = newInterval;
+        }
+        return;
+    }
+
+    if (msg.startsWith("GOAL_")) {
+        const newGoal = msg.substring(5);
+        document.getElementById("currGoal").textContent = newGoal;
+        return;
+    }
+
     // -----------------------------------------------------------------------
     // TEL PARSING
 
@@ -220,7 +273,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dt.length === 24) {
 
-      // --- Update on-screen text ---
+      // Update text
       document.getElementById('rssiCurr').textContent = dt[0];
       document.getElementById('rssiAvg').textContent = dt[1];
       document.getElementById('tempInt').textContent = (dt[2] / 100).toFixed(2);
@@ -246,7 +299,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('dist2').textContent = dt[22];
       document.getElementById('dist3').textContent = dt[23];
 
-      // --- Add to graph buffers ---
+      // Append to graph buffers
       appendTelemetry(telemetry.rssiCurr, parseInt(dt[0]));
       appendTelemetry(telemetry.rssiAvg, parseInt(dt[1]));
       appendTelemetry(telemetry.tempInt, dt[2] / 100);
@@ -272,7 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
       appendTelemetry(telemetry.dist2, parseInt(dt[22]));
       appendTelemetry(telemetry.dist3, parseInt(dt[23]));
 
-      // --- Update visible charts ---
+      // Update current charts
       refreshVisibleCharts();
     }
   };
@@ -363,5 +416,4 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('setStepBtn').onclick = () => {
     sendCommand(`STEP_${stepSize.value}`);
   };
-
 });
