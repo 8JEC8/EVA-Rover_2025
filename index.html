@@ -38,7 +38,7 @@ h2 {
 /* Subtle animated glow */
 @keyframes glowPulse {
   from { text-shadow: 0 2px 4px rgba(52, 6, 255, 0.992), 0 0 10px rgb(202, 13, 231); }
-  to   { text-shadow: 0 2px 8px rgba(0,0,0,0.2), 0 0 15px  rgba(0,0,0,0.2)< }
+  to   { text-shadow: 0 2px 8px rgba(0,0,0,0.2), 0 0 15px  rgba(0,0,0,0.2) }
 }
 
   /* Main container: 3 columns */
@@ -369,51 +369,6 @@ h2 {
     user-select: none;
   }
 
-  /* Toggle tag on the left */
-  #serialMonitorToggle {
-    position: fixed;
-    top: 90%;
-    right: 0;
-    left: auto;
-    transform: translateY(-50%);
-    background: #222;
-    color: #fff;
-    padding: 8px 12px;
-    border-radius: 5px 0 0 5px;
-    cursor: pointer;
-    z-index: 1000;
-    font-size: 18px;
-    opacity: 0.8;
-  }
-
-  /* Sliding serial monitor panel */
-  #serialMonitor {
-    position: fixed;
-    top: 0;
-    left: -85%; /* hidden to the left */
-    width: 80%;
-    height: 100%;
-    background: rgba(0,0,0,0.90);
-    color: #0f0;
-    padding: 10px;
-    overflow-y: auto;
-    transition: left 0.3s ease;
-    font-size: 14px;
-    font-family: monospace;
-    z-index: 999;
-  }
-
-  #serialOutput {
-    white-space: pre-wrap;   /* Wraps long lines */
-    word-wrap: break-word;   /* Breaks long words */
-    font-family: monospace;
-  }
-
-  /* When open */
-  #serialMonitor.open {
-    left: 0;
-  }
-
 /* Responsive */
 @media (max-width: 900px), (max-width: 1200px) and (min-width: 901px) {
 
@@ -502,14 +457,6 @@ h2 {
 </head>
 <body>
 <h2>~EVA: Dashboard de Telemetría y Control~</h2>
-
-<!-- Tag to open/close -->
-<div id="serialMonitorToggle">▶</div>
-
-<!-- The serial monitor panel -->
-<div id="serialMonitor">
-  <pre id="serialOutput"></pre>
-</div>
 
 <div class="controls-line"></div>
 
@@ -615,35 +562,35 @@ h2 {
   <div class="command-input-row">
     <label for="goalInput">Coord. de Meta (X.Y)</label>
     <div class="current-value-box" id="currGoal">0,0</div>
-    <input type="text" id="goalCoords" value="0">
+    <input type="text" id="goalCoords" value="">
     <button id="setGoalBtn">Enviar</button>
   </div>
 
   <div class="command-input-row">
     <label for="objectInput">Objetos Digitales (X.Y)</label>
     <div class="current-value-box" id="currObj">0</div>
-    <input type="text" id="objectCoords" value="0">
+    <input type="text" id="objectCoords" value="">
     <button id="setObjBtn">Enviar</button>
   </div>
 
     <div class="command-input-row">
     <label for="intervalInput">Intervalo Telemetría (s):</label>
     <div class="current-value-box" id="currInterval">1.5</div>
-    <input type="number" id="intervalInput" min="1" max="120" step="0.1" value="1">
+    <input type="number" id="intervalInput" min="1" max="120" step="0.1" value="">
     <button id="setIntervalBtn">Enviar</button>
   </div>
 
   <div class="command-input-row">
     <label for="speedInput">Tamaño de Chunks (B):</label>
     <div class="current-value-box" id="currChunks">128</div>
-    <input type="number" id="chunkSize" min="1" max="200" step="1" value="128">
+    <input type="number" id="chunkSize" min="1" max="200" step="1" value="">
     <button id="setChunkBtn">Enviar</button>
   </div>
 
   <div class="command-input-row">
     <label for="stepInput">Pasos de Motor (6400/T):</label>
     <div class="current-value-box" id="currSteps">6400</div>
-    <input type="number" id="stepSize" min="1" max="25600" value="6400">
+    <input type="number" id="stepSize" min="1" max="25600" value="">
     <button id="setStepBtn">Enviar</button>
   </div>
 </div>
@@ -751,52 +698,6 @@ h2 {
   </div>
 </div>
 
-<script>
-  const rows = 10;
-  const cols = 10;
-
-  const grid = document.getElementById("grid");
-
-  // Generar celdas dinámicas
-  for (let i = 0; i < rows * cols; i++) {
-      const cell = document.createElement("div");
-      cell.className = "cell";
-      cell.id = "cell-" + i;
-      grid.appendChild(cell);
-  }
-
-  const monitor = document.getElementById("serialMonitor");
-  const toggle = document.getElementById("serialMonitorToggle");
-  const output = document.getElementById("serialOutput");
-
-  toggle.addEventListener("click", () => {
-    monitor.classList.toggle("open");
-    toggle.textContent = monitor.classList.contains("open") ? "◀" : "▶";
-  });
-
-  let serialBuffer = [];    // store messages here
-  const MAX_MESSAGES = 50;  // limit
-
-  function addSerialMessage(msg) {
-    serialBuffer.push(msg + "\n");
-
-    // Keep only last 50 messages
-    if (serialBuffer.length > MAX_MESSAGES) {
-      serialBuffer.shift();
-    }
-
-    // Render buffer
-    output.textContent = serialBuffer.join("\n");
-    output.scrollTop = output.scrollHeight;
-  }
-
-  // Example for testing (you can remove)
-  addSerialMessage("Bienvenido al Monitor Serial de EVA [^_^]");
-  addSerialMessage("Desplegando Mensajes Recibidos...");
-
-  const base64String = "";
-  document.getElementById('camImage').src = "data:image/jpeg;base64," + base64String;
-</script>
 <script src="chart.umd.min.js"></script>
 <script src="main.js"></script>
 </body>
