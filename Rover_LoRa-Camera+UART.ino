@@ -131,17 +131,17 @@ void handleRequest(String cmd) {
     receivingTel = true;
   }
 
-  if (cmd == "STP") {
+  else if (cmd == "STP") {
     receivingTel = false;
   }
 
-  if (cmd.startsWith("CK")) {
+  else if (cmd.startsWith("CK")) {
       String numStr = cmd.substring(2);
       int newSize = numStr.toInt();
       chunkSize = newSize;
   }
 
-  if (cmd == "SRA") {
+  else if (cmd == "SRA") {
     LoRa.setSpreadingFactor(7);
     LoRa.setSignalBandwidth(250E3);
     LoRa.setCodingRate4(5);
@@ -149,7 +149,7 @@ void handleRequest(String cmd) {
     Serial.println("INT1.5");
   }
 
-  if (cmd == "MRA") {
+  else if (cmd == "MRA") {
     LoRa.setSpreadingFactor(9);
     LoRa.setSignalBandwidth(125E3);
     LoRa.setCodingRate4(6);
@@ -157,7 +157,7 @@ void handleRequest(String cmd) {
     Serial.println("INT2.5");
   }
 
-  if (cmd == "LRA") {
+  else if (cmd == "LRA") {
     LoRa.setSpreadingFactor(11);
     LoRa.setSignalBandwidth(125E3);
     LoRa.setCodingRate4(8);
@@ -165,23 +165,34 @@ void handleRequest(String cmd) {
     Serial.println("INT8.0");
   }
 
-  if (cmd == "IMG") {
+  else if (cmd == "STPIMG") {
+    Serial.println("IMGDONE");
+    if (wasReceivingTel) {
+        Serial.println("GO");
+        receivingTel = true;
+    }
+  }
+
+  else if (cmd == "IMG") {
     wasReceivingTel = receivingTel;
 
     // Detener TEL y capturar Imagen + Flash LED
     Serial.println("STP");
     receivingTel = false;
     Serial.println("FCAM");
+    delay(20);
+    Serial.println("IMGSTART");
     captureAndStoreImage();
     return;
   }
 
-  if (cmd.startsWith("REQ_")) {
+  else if (cmd.startsWith("REQ_")) {
       int reqNum = cmd.substring(4).toInt();
       if (reqNum >= 1 && reqNum <= totalChunks) {
 
           if (reqNum == totalChunks) {
               delay(250);
+              Serial.println("IMGDONE");
           }
 
           String packet = "C_" + imageChunks[reqNum - 1];
