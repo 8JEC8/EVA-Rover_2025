@@ -129,7 +129,20 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // ---------------------------------------------------------------------------
-  // UPDATE GRID
+  // UPDATE GRID AND OBJECT COUNT
+  function updateObjectCount() {
+    const cells = document.querySelectorAll(".cell");
+    let count = 0;
+
+    cells.forEach(c => {
+      if (c.style.backgroundColor === "red") {
+        count++;
+      }
+    });
+
+    document.getElementById("currObj").textContent = count;
+  }
+
   function updateGridFromMessage(msg) {
     // msg = "M,0000000000,0000000000,..."
     const parts = msg.split(",");
@@ -158,6 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // empty (do nothing)
         }
         else if (val === "1") {
+          cell.textContent = "X";
           cell.style.backgroundColor = "red";
         }
         else if (val === "2") {
@@ -176,8 +190,14 @@ document.addEventListener('DOMContentLoaded', () => {
           cell.textContent = "↓";
           cell.style.backgroundColor = "blue";
         }
+        else if (val === "6") {
+          cell.textContent = "O";
+          cell.style.backgroundColor = "yellow";
+        }
       }
     }
+
+    updateObjectCount();
   }
 
 
