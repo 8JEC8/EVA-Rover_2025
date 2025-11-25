@@ -369,6 +369,42 @@ h2 {
     user-select: none;
   }
 
+  .graph-box {
+    background: #fff;
+    border-radius: 12px;
+    border: 4px solid #000000;
+    padding: 15px 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+
+    /* NEW — ensures proper layout */
+    display: flex;
+    flex-direction: column;     /* stack h3, select, canvas */
+    align-items: stretch;       /* canvas becomes full width */
+    justify-content: flex-start;
+    
+    gap: 12px;
+
+    width: 100%;
+    max-width: 450px;
+    height: 350px;              /* FIXED HEIGHT — adjust if needed */
+    margin: 0 auto;
+    box-sizing: border-box;
+  }
+
+  /* Make canvas fill remaining space */
+  .graph-box canvas {
+    flex: 1;                    /* expand to fill leftover height */
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .graph-box h3 {
+    width: 100%;
+    text-align: center;
+    margin: 0;
+    margin-bottom: 6px; /* optional spacing */
+  }
+
 /* Responsive */
 @media (max-width: 900px), (max-width: 1200px) and (min-width: 901px) {
 
@@ -613,6 +649,10 @@ h2 {
     <button id="forceLong" class="command-button">-LoRa- <br> Largo Alcance</button>
   </div>
 
+  <div class="grid-box">
+      <div id="grid"></div>
+  </div>
+
 </div>
 
 <div class="controls-line"></div>
@@ -620,7 +660,7 @@ h2 {
 <div class="controls-container">
 
   <!-- BOX 1 -->
-  <div class="controls-box command-button-box">
+  <div class="controls-box graph-box">
     <h3>RSSI</h3>
 
     <select class="chart-select" data-box="1">
@@ -632,7 +672,7 @@ h2 {
   </div>
 
   <!-- BOX 2 -->
-  <div class="controls-box command-button-box">
+  <div class="controls-box graph-box">
     <h3>Temperatura y Humedad</h3>
 
     <select class="chart-select" data-box="2">
@@ -646,7 +686,7 @@ h2 {
   </div>
 
   <!-- BOX 3 -->
-  <div class="controls-box command-button-box">
+  <div class="controls-box graph-box">
     <h3>Potencia y Alimentación</h3>
 
     <select class="chart-select" data-box="3">
@@ -665,7 +705,7 @@ h2 {
   </div>
 
   <!-- BOX 4 -->
-  <div class="controls-box command-button-box">
+  <div class="controls-box graph-box">
     <h3>Giroscopio y Acelerómetro</h3>
 
     <select class="chart-select" data-box="4">
@@ -681,7 +721,7 @@ h2 {
   </div>
 
   <!-- BOX 5 -->
-  <div class="controls-box command-button-box">
+  <div class="controls-box graph-box">
     <h3>Sensores de Distancia</h3>
 
     <select class="chart-select" data-box="5">
@@ -692,11 +732,8 @@ h2 {
 
     <canvas id="chartBoxDIST"></canvas>
   </div>
-
-  <div class="grid-box">
-      <div id="grid"></div>
-  </div>
 </div>
+
 
 <script src="chart.umd.min.js"></script>
 <script src="main.js"></script>
