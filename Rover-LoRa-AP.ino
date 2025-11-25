@@ -6,8 +6,8 @@
 #include "esp_task_wdt.h"
 #include <LittleFS.h>
 #define LORA_FREQ 433E6
-#define LORA_SS   10    // CS
-#define LORA_DIO0 42   // DIO0
+#define LORA_SS   5    // CS
+#define LORA_DIO0 25   // DIO0
 #define WDT_TIMEOUT 10   // seconds
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// HTML embebido
@@ -751,6 +751,7 @@ void cancelImageTransfer() {
   msgToSend = "";
   Serial.println("IMAGE_TRANSFER_CANCELLED");
   webSocket.broadcastTXT("IMG_DONE");
+  queueMessage("STPIMG");
 }
 
 void watchdogTask(void *parameter) {
