@@ -401,6 +401,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('requestImage').onclick = () => sendCommand('WEB_IMG');
   document.getElementById('captureImage').onclick = () => sendCommand('CAPTURE_IMG');
   document.getElementById('cancelImage').onclick = () => sendCommand('CANCEL_IMG');
+    document.getElementById('resetCam').onclick = () => sendCommand('RESET_CAM');
+
 
   document.getElementById('startAuto').onclick = () => sendCommand('START_AUTO');
   document.getElementById('resumeAuto').onclick = () => sendCommand('RESUME_AUTO');
@@ -418,22 +420,27 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('setGoalBtn').onclick = () => {
     const coords = goalCoords.value.trim();
     sendCommand(`GOAL_${coords}`);
+    goalCoords.value = "";
   };
 
   document.getElementById('setObjBtn').onclick = () => {
     const coords = objectCoords.value.trim();
     sendCommand(`OBJECT_${coords}`);
+    objectCoords.value = "";
   };
 
   document.getElementById('setIntervalBtn').onclick = () => {
     sendCommand(`CSV_${intervalInput.value}`);
+    intervalInput.value = "";
   };
 
   document.getElementById('setChunkBtn').onclick = () => {
     sendCommand(`CHUNK_${chunkSize.value}`);
+    chunkSize.value = "";
   };
 
   document.getElementById('setStepBtn').onclick = () => {
     sendCommand(`STEP_${stepSize.value}`);
+    stepSize.value = "";
   };
 });
