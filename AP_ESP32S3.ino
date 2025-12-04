@@ -4,6 +4,7 @@
 #include <WebSocketsServer.h>
 #include <WebServer.h>
 #include "esp_task_wdt.h"
+#include <LittleFS.h>
 #define LORA_FREQ 433E6
 #define LORA_SS   10    // CS
 #define LORA_DIO0 42   // DIO0
@@ -11,7 +12,6 @@
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// HTML embebido
 const char index_html[] PROGMEM = R"rawliteral(
-
 )rawliteral";
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// JS embebido
@@ -20,13 +20,12 @@ const char main_js[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 const char* apSSID = "EVA_Dashboard";
-const char* apPassword = "Voyager21";  // min 8 chars
+const char* apPassword = "VOYAGER21"; //min 8 caracteres
 
 WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
 
-// Only first client can control
-uint8_t controllerClient = 255; // 255 = no controller yet
+uint8_t controllerClient = 255; // 255 = no hay controlador aún
 
 String imgBuffer = "";
 String webImage = "";
@@ -40,28 +39,31 @@ bool receivingImage = false;
 String msgToSend = "";                    // Fila de mensaje de monitor serial
 bool msgQueued = false;
 
-unsigned long retryInterval = 500;        // Default LoRa MID: ms entre intervalos de envío
-unsigned long ackTimeout = 2000;          // Default LoRa MID: 2 segundo de espera en reintento
-unsigned long chunkTimeout = 2000;        // Default LoRa MID: 2 segundos para reenviar solicitud de chunk
+unsigned long retryInterval = 100;        // Default LoRa SHORT: ms entre intervalos de envío
+unsigned long ackTimeout = 500;           // Default LoRa MID: 500ms espera en reintento
+unsigned long chunkTimeout = 1500;        // Default LoRa MID: 1.5 segundos para reenviar solicitud de chunk
 
 unsigned long msgStartTime = 0;           // Cuando el mensaje fue enviado
-unsigned long lastSendAttempt = 0;
-unsigned long lastChunkRequestTime = 0;
+unsigned long lastSendAttempt = 0;        // Cuando el mensaje se intentó enviar
+unsigned long lastChunkRequestTime = 0;   // Cuando el chunk se solicitó por última vez
 
-int expectedLength = 128;
+int expectedLength = 200;
+float csvInt = 1.5;
+int nemaStep = 3740;
+String currGoal = "";
 
 // Estados LoRa
 enum LoRaRange { SHORT, MID, LONG };
 LoRaRange currentRange = SHORT;  // Iniciar SHORT
 
-// RSSI Threshold
-const int shortToMid = -65;   // SHORT → MID
-const int midToShort  = -45;  // MID → SHORT
-const int midToLong   = -100; // MID → LONG
-const int longToMid   = -90;  // LONG → MID
+// RSSI Umbral
+const int shortToMid = -65;   // SHORT -> MID
+const int midToShort  = -45;  // MID -> SHORT
+const int midToLong   = -110; // MID -> LONG
+const int longToMid   = -90;  // LONG -> MID
 
 // Promedio RSSI
-const int rssiSampleCount = 5;    // Number of samples in the rolling average
+const int rssiSampleCount = 4;    // Muestras en promediado
 int rssiSamples[rssiSampleCount] = {0};
 int sampleIndex = 0;
 int sampleTotal = 0;
@@ -71,6 +73,10 @@ void setup() {
   Serial.begin(115200);
   while (!Serial);
 
+  if (!LittleFS.begin()) {
+    Serial.println("ERR_LittleFS");
+  }
+  
   const esp_task_wdt_config_t wdt_config = {
         .timeout_ms = WDT_TIMEOUT * 1000,
         .idle_core_mask = (1 << 0) | (1 << 1),
@@ -92,6 +98,7 @@ void setup() {
   );
 
   // Start AP
+  esp_log_level_set("wifi", ESP_LOG_NONE);
   WiFi.softAP(apSSID, apPassword);
   IPAddress IP = WiFi.softAPIP();
   Serial.print("\nConectar a Dashboard: http://");
@@ -102,14 +109,25 @@ void setup() {
     server.send_P(200, "text/html", index_html);
   });
 
-  // ====== Serve JS file ======
+  // Serve JS
   server.on("/main.js", HTTP_GET, []() {
     server.send_P(200, "application/javascript", main_js);
   });
 
+  server.on("/chart.umd.min.js", HTTP_GET, []() {
+    File file = LittleFS.open("/chart.umd.min.js", "r");
+    if (!file) {
+      server.send(404, "text/plain", "chart.umd.min.js not found");
+      return;
+    }
+    server.streamFile(file, "application/javascript");
+    file.close();
+  });
+
+
   server.begin();
 
-  // ====== WebSocket server ======
+  // WebSocket - Servidor
   webSocket.begin();
   webSocket.onEvent(onWebSocketEvent);
 
@@ -122,13 +140,12 @@ void setup() {
     while (true);
   }
 
-  // LoRa Settings:
   LoRa.setTxPower(20);
   LoRa.setSpreadingFactor(7); // Spreading Factor
   LoRa.setSignalBandwidth(250E3); // BW
   LoRa.setCodingRate4(5); // Coding Rate
   LoRa.setSyncWord(0x88); // Sync word
-  LoRa.setPreambleLength(6); // Preamble: 10 symbols
+  LoRa.setPreambleLength(6); // Preamble:
   LoRa.enableCrc(); // CRC
 
   Serial.println("Voyager21: Comunicación LoRa Habillitada");
@@ -143,12 +160,27 @@ void loop() {
   webSocket.loop();
   server.handleClient();
 
-  // --- RECEIVE: LoRa ---
+  // Recepción LORA
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
     String received = "";
     while (LoRa.available()) received += (char)LoRa.read();
     received.trim();
+
+    // Filtrar basura
+    bool valid = true;
+    for (unsigned int i = 0; i < received.length(); i++) {
+      char c = received[i];
+      if ((c < 32 || c > 126) && c != '\n' && c != '\r') {
+        valid = false;
+        break;
+      }
+    }
+
+    if (!valid) {
+      Serial.println("NONSENSE_RECEIVED");
+      return;  // Descartar antes de actualizar RSSI
+    }
     
     // Obtener RSSI
     int rssi = LoRa.packetRssi();  // RSSI de mensaje entrante
@@ -164,16 +196,48 @@ void loop() {
     Serial.println("  RECV_ROVER_" + String(rssi) + "," + String(avgRssi) + "," + received);
 
     if (msgQueued && received.startsWith("ACK_")) {
-        String ackFor = received.substring(4);
-        if (ackFor == msgToSend) {
-            msgQueued = false;
-            msgToSend = "";
+      String ackFor = received.substring(4);
+      if (ackFor == msgToSend) {
+          msgQueued = false;
+          msgToSend = "";
 
-            if (ackFor == "SRA") LoRaShort();
-            if (ackFor == "MRA") LoRaMid();
-            if (ackFor == "LRA") LoRaLong();
-            if (receivingImage && ackFor.startsWith("REQ_")) lastChunkRequestTime = now;
-        }
+          if (ackFor == "SRA") LoRaShort();
+          else if (ackFor == "MRA") LoRaMid();
+          else if (ackFor == "LRA") LoRaLong();
+
+          else if (receivingImage && ackFor.startsWith("REQ_")) lastChunkRequestTime = now;
+      }
+        
+      if (ackFor.startsWith("CK")) {
+        String lenCK = ackFor.substring(2);
+        int newlen = lenCK.toInt();
+        if (newlen > 0) expectedLength = newlen;
+        Serial.println("  SET_CHUNK_SIZE_" + String(expectedLength));
+        webSocket.broadcastTXT("CK_" + String(expectedLength));
+      }
+
+      else if (ackFor.startsWith("INT")) {
+        String lenINT = ackFor.substring(3);
+        float newInt = lenINT.toFloat();
+        if (newInt > 0) csvInt = newInt;
+        Serial.println("  SET_CSV_INTERVAL_" + String(csvInt));
+        webSocket.broadcastTXT("CSVINT_" + String(csvInt));
+      }
+
+      else if (ackFor.startsWith("SET")) {
+        String lenSTEP = ackFor.substring(3);
+        int newStep = lenSTEP.toInt();
+        if (newStep > 0) nemaStep = newStep;
+        Serial.println("  SET_STEP_SIZE_" + String(nemaStep));
+        webSocket.broadcastTXT("NEMA_" + String(nemaStep));
+      }
+
+      else if (ackFor.startsWith("GOAL")) {
+        String lenGOAL = ackFor.substring(4);
+        currGoal = lenGOAL;
+        Serial.println("  GOAL_UPDATED" + String(currGoal));
+        webSocket.broadcastTXT("GOAL_" + String(currGoal));
+      }
     }
 
     // Cambio dinámico dependiendo de Thresholds
@@ -203,7 +267,7 @@ void loop() {
             break;
     }
 
-    // Handle image ready signal
+    // Tamaño de Imagen recibido, iniciar modo recepción de Imagen
     if (received.startsWith("IMG_SIZE")) {
       expectedChunks = received.substring(received.indexOf(',') + 1).toInt();
       receivedChunks = 0;
@@ -213,7 +277,7 @@ void loop() {
       Serial.printf("EXPECTING_%d_CHUNKS\n", expectedChunks);
       webSocket.broadcastTXT("IMG_START");
 
-      // Start requesting first chunk
+      // Solicitar Chunk 1
       msgToSend = "REQ_1";
       msgQueued = true;
       lastSendAttempt = now;
@@ -221,20 +285,21 @@ void loop() {
       lastChunkRequestTime = now;
     }
 
+    else if (received.startsWith("M,")) {
+      webSocket.broadcastTXT(received);
+    }
+
     else if (received.indexOf(',') != -1) {
       String webTelemetry = String(rssi) + "," + String(avgRssi) + "," + received;
       webSocket.broadcastTXT(webTelemetry);
     }
 
-    // Handle chunk data
+    // Evaluación de Chunk entrante
     else if (received.startsWith("C_")) {
       if (receivingImage) {
         String chunkData = received.substring(2);
 
-        if (receivedChunks == expectedChunks - 1) expectedLength = -1;
-
-        bool lengthOK = (expectedLength == -1 && chunkData.length() <= 128) ||
-                        (chunkData.length() == expectedLength);
+        bool lastChunk = (receivedChunks == expectedChunks - 1);
 
         bool b64OK = true;
         for (int i = 0; i < chunkData.length(); i++) {
@@ -246,12 +311,14 @@ void loop() {
           }
         }
 
+        bool lengthOK = (lastChunk && chunkData.length() <= expectedLength) ||
+                        (chunkData.length() == expectedLength);
+
         if (lengthOK && b64OK) {
           imgBuffer += chunkData;
           receivedChunks++;
           Serial.printf("  RECV_CHUNK_%d/%d\n", receivedChunks, expectedChunks);
 
-          // Request next chunk
           if (receivedChunks < expectedChunks) {
             msgToSend = "REQ_" + String(receivedChunks + 1);
             msgQueued = true;
@@ -268,8 +335,9 @@ void loop() {
             webSocket.broadcastTXT("IMG_DONE");
           }
         } else {
-          Serial.printf("CHUNK_%d_INVALID(len=%d,b64=%s)_REREQ\n",
-                        receivedChunks + 1, chunkData.length(), b64OK ? "OK" : "FAIL");
+          Serial.printf("CHUNK_%d_INVALID(len=%d, b64=%s, last=%d)\n",
+                        receivedChunks + 1, chunkData.length(),
+                        b64OK ? "OK" : "FAIL", lastChunk);
           msgToSend = "REQ_" + String(receivedChunks + 1);
           msgQueued = true;
           lastSendAttempt = now;
@@ -280,21 +348,21 @@ void loop() {
     }
   }
 
-  // --- RETRY queued message with timeout ---
+  // REINTENTAR mensaje en cola con Timeout
   if (msgQueued) {
-      // Send / retry first
+      // Mandar y reintentar
       if (now - lastSendAttempt >= retryInterval && LoRa.beginPacket()) {
           LoRa.print(msgToSend);
           LoRa.endPacket();
           lastSendAttempt = now;
 
-          // Start timeout **immediately after first send**
+          // Comenzar timeout al mandar primera vez
           if (msgStartTime == 0) msgStartTime = now;
 
           Serial.println("SENT_EST_" + msgToSend);
       }
 
-      // Then check timeout (after potential first send)
+      // Timeout de no recibir ACK
       if (msgStartTime > 0 && now - msgStartTime >= ackTimeout) {
           Serial.println("MSG_TIMEOUT");
           msgQueued = false;
@@ -303,6 +371,7 @@ void loop() {
       }
   }
 
+  // Timeout de Chunk, Resolicitar
   if (receivingImage && !msgQueued && (now - lastChunkRequestTime >= chunkTimeout)) {
     Serial.printf("CHUNK_%d_TIMEOUT_REREQUESTING\n", receivedChunks + 1);
     msgToSend = "REQ_" + String(receivedChunks + 1);
@@ -326,6 +395,12 @@ void handleSerial() {
     if (serialInput.equalsIgnoreCase(".COMLIST")) {
       printCommandList();
     }
+
+    if (serialInput.equalsIgnoreCase(".RESETSTA")) {
+      delay(200);
+      ESP.restart();
+    }
+
     else if (serialInput.startsWith(".CHUNK")) {
       String setChunksStr = serialInput.substring(6);
       setChunksStr.trim();
@@ -352,7 +427,7 @@ void handleSerial() {
     else if (serialInput.startsWith(".STEP")) {
       String stepsStr = serialInput.substring(5);
       stepsStr.trim();
-      int stepsVal = stepsStr.toInt();  // use toInt() for integer steps
+      int stepsVal = stepsStr.toInt();
 
       if (stepsVal > 0) {
         queueMessage("SET" + String(stepsVal));
@@ -383,7 +458,48 @@ void handleSerial() {
     else if (serialInput.equalsIgnoreCase(".MID")) queueMessage("MRA");
     else if (serialInput.equalsIgnoreCase(".LONG")) queueMessage("LRA");
     else if (serialInput.equalsIgnoreCase(".START")) queueMessage("GO");
+    else if (serialInput.equalsIgnoreCase(".GO")) queueMessage("GO");
     else if (serialInput.equalsIgnoreCase(".STOP")) queueMessage("STP");
+    else if (serialInput.equalsIgnoreCase(".NOSTEP")) queueMessage(".NOSTEP");
+
+    else if (serialInput.startsWith(".OBJ")) {
+      String params = serialInput.substring(4);
+      params.trim();
+      int sp = params.indexOf(' ');
+      if (sp > 0) {
+        String xStr = params.substring(0, sp);
+        String yStr = params.substring(sp + 1);
+        xStr.trim();
+        yStr.trim();
+        queueMessage("OBJ" + xStr + "," + yStr);
+      } else {
+        Serial.println("ERROR_OBJ_FORMAT");
+      }
+    }
+    else if (serialInput.startsWith(".GOAL")) {
+      String params = serialInput.substring(5);
+      params.trim();
+      int sp = params.indexOf(' ');
+      if (sp > 0) {
+        String xStr = params.substring(0, sp);
+        String yStr = params.substring(sp + 1);
+        xStr.trim();
+        yStr.trim();
+        queueMessage("GOAL" + xStr + "," + yStr);
+      } else {
+        Serial.println("ERROR_GOAL_FORMAT");
+      }
+    }
+    else if (serialInput.equalsIgnoreCase(".AUTO")) queueMessage("AUTO");
+    else if (serialInput.equalsIgnoreCase(".STOPAUTO")) queueMessage("STOPAUTO");
+    else if (serialInput.equalsIgnoreCase(".PAUSE")) queueMessage("PAUSE");
+    else if (serialInput.equalsIgnoreCase(".RESUME")) queueMessage("RESUME");
+    else if (serialInput.equalsIgnoreCase(".REVERSE")) queueMessage("REVERSE");
+    else if (serialInput.equalsIgnoreCase(".CLEAR")) queueMessage("CLEAR");
+    else if (serialInput.equalsIgnoreCase(".CLEARALL")) queueMessage("CLEARALL");
+    else if (serialInput.equalsIgnoreCase(".RESET")) queueMessage("RES");
+    else if (serialInput.equalsIgnoreCase(".RECAM")) queueMessage("RECAM");
+    else if (serialInput.equalsIgnoreCase(".PARTY")) queueMessage("PARTY");
     else  {
       Serial.println("UNKNOWN_IGNORED");
     }
@@ -393,7 +509,7 @@ void handleSerial() {
 void queueMessage(String msg) {
   msgToSend = msg;
   msgQueued = true;
-  lastSendAttempt = 0;  // Enviar inmediatamente, enviar en siguiente ciclo si es necesario
+  lastSendAttempt = 0;  // Enviar inmediatamente mensaje en cola
   msgStartTime = 0;
 }
 
@@ -407,14 +523,14 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
     case WStype_CONNECTED: {
       Serial.printf("CLIENT_%u_CONN\n", client_num);
 
-      // Tell this client its real ESP-assigned ID
+      // Asignar ID dado por Estación
       webSocket.sendTXT(client_num, "ASSIGN_ID_" + String(client_num));
 
-      // Send current control state
+      // Mandar estado de Control
       String helloMsg = "CTRL_" + String(controllerClient);
       webSocket.sendTXT(client_num, helloMsg);
 
-      // If no controller, make this one controller
+      // Si no hay controlador, hacer este cliente controlador
       if (controllerClient == 255) {
         controllerClient = client_num;
         broadcastControlState();
@@ -426,7 +542,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
     case WStype_DISCONNECTED: {
       Serial.printf("CLIENT_%u_DC\n", client_num);
 
-      // If the controller disconnects, release control
+      // Si controlador DC, control disponible
       if (client_num == controllerClient) {
         controllerClient = 255;
         broadcastControlState();
@@ -439,7 +555,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
       String msg = String((char*)payload);
       msg.trim();
 
-      // --- Handle control requests ---
+      // Manejar solicitudes de Control
       if (msg == "REQUEST_CONTROL") {
         if (controllerClient == 255) {
           controllerClient = client_num;
@@ -451,25 +567,25 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
         return;
       }
 
-      // --- Handle control release ---
+      // Manejar renuncio de Control
       if (msg == "RELEASE_CONTROL") {
         if (client_num == controllerClient) {
           controllerClient = 255;
           broadcastControlState();
           Serial.printf("CLIENT_%u_RELEASES_CONTROL\n", client_num);
         } else {
-          //Serial.printf("CLIENT_%u_NOT_CONTROLLER_CANNOT_RELEASE\n", client_num);
+          // Nada
         }
         return;
       }
 
-      // --- Image request (anyone can do this) ---
+      // Get: Imagen, todos pueden (no solicitarla, desplegarla en UI si existe)
       if (msg == "WEB_IMG") {
         webSocket.sendTXT(client_num, "IMG_" + webImage);
         return;
       }
 
-      // --- Only controller can send control commands ---
+      // Solo Controlador puede enviar comands
       if (client_num == controllerClient) {
         if (msg == "UP") queueMessage("W");
         else if (msg == "DOWN") queueMessage("S");
@@ -477,8 +593,71 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
         else if (msg == "RIGHT") queueMessage("D");
         else if (msg == "CAPTURE_IMG") queueMessage("IMG");
         else if (msg == "CANCEL_IMG") cancelImageTransfer();
+        else if (msg == "RESET_CAM") queueMessage("RECAM");
         else if (msg == "START_TEL") queueMessage("GO");
         else if (msg == "STOP_TEL") queueMessage("STP");
+
+        // GOAL_X,Y
+        else if (msg.startsWith("GOAL_")) {
+          String params = msg.substring(5);
+          params.trim();
+
+          int sep = params.indexOf(',');
+          if (sep > 0) {
+            String xGoal = params.substring(0, sep);
+            String yGoal = params.substring(sep + 1);
+            queueMessage("GOAL" + xGoal + "," + yGoal);
+          }
+          return;
+        }
+
+        // OBJECT_X,Y
+        else if (msg.startsWith("OBJECT_")) {
+          String params = msg.substring(7);
+          params.trim();
+
+          int sep = params.indexOf(',');
+          if (sep > 0) {
+            String xObj = params.substring(0, sep);
+            String yObj = params.substring(sep + 1);
+            queueMessage("OBJ" + xObj + "," + yObj);
+          }
+          return;
+        }
+
+        else if (msg.startsWith("CSV_")) {
+          String intervalInput = msg.substring(4);
+          intervalInput.trim();
+          queueMessage("INT" + intervalInput);
+          return;
+        }
+        
+        // CHUNK_size
+        else if (msg.startsWith("CHUNK_")) {
+          String chunkSize = msg.substring(6);
+          chunkSize.trim();
+          queueMessage("CK" + chunkSize);
+          return;
+        }
+
+        // STEP_size
+        else if (msg.startsWith("STEP_")) {
+          String stepSize = msg.substring(5);
+          stepSize.trim();
+          queueMessage("SET" + stepSize);
+          return;
+        }
+
+        else if (msg == "START_AUTO") queueMessage("AUTO");
+        else if (msg == "STOP_AUTO") queueMessage("STOPAUTO");
+        else if (msg == "PAUSE_AUTO") queueMessage("PAUSE");
+        else if (msg == "RESUME_AUTO") queueMessage("RESUME");
+        else if (msg == "REVERSE_AUTO") queueMessage("REVERSE");
+        else if (msg == "CLEAR_MAP") queueMessage("CLEAR");
+        else if (msg == "CLEAR_ALL") queueMessage("CLEARALL");
+        else if (msg == "RESET_ROVER") queueMessage("RES");
+        else if (msg == "PARTY_MODE") queueMessage("PARTY");
+
         else if (msg == "LORA_SHORT") LoRaShort();
         else if (msg == "LORA_MEDIUM") LoRaMid();
         else if (msg == "LORA_LONG") LoRaLong();
@@ -502,10 +681,12 @@ void LoRaShort() {
   LoRa.setCodingRate4(5);
   LoRa.setPreambleLength(6);
   delay(50);
-  retryInterval = 500;
-  ackTimeout = 2000;
-  chunkTimeout = 2000;
+  retryInterval = 100;
+  ackTimeout = 500;
+  chunkTimeout = 1500;
   currentRange = SHORT;
+  webSocket.broadcastTXT("CSVINT_1.5");
+  webSocket.broadcastTXT("CK_200");
 }
 
 void LoRaMid() {
@@ -517,10 +698,12 @@ void LoRaMid() {
   LoRa.setCodingRate4(6);
   LoRa.setPreambleLength(8);
   delay(50);
-  retryInterval = 1500;
-  ackTimeout = 6000;
-  chunkTimeout = 5000;
+  retryInterval = 300;
+  ackTimeout = 1500;
+  chunkTimeout = 2000;
   currentRange = MID;
+  webSocket.broadcastTXT("CSVINT_2.5");
+  webSocket.broadcastTXT("CK_128");
 }
 
 void LoRaLong() {
@@ -532,46 +715,59 @@ void LoRaLong() {
   LoRa.setCodingRate4(8);
   LoRa.setPreambleLength(10);
   delay(50);
-  retryInterval = 2000;
-  ackTimeout = 8000;
-  chunkTimeout = 7000;
+  retryInterval = 1500;
+  ackTimeout = 6000;
+  chunkTimeout = 5000;
   currentRange = LONG;
+  webSocket.broadcastTXT("CSVINT_5.0");
+  webSocket.broadcastTXT("CK_64");
 }
 
 void printCommandList() {
   Serial.println("  Lista de Comandos:");
+  Serial.println("    '.RESETSTA'     : Reiniciar ESP de Estación Terrestre");
   Serial.println("    '.W'            : Movimiento Hacia Adelante");
   Serial.println("    '.S'            : Movimiento Hacia Atrás");
   Serial.println("    '.A'            : Movimiento CCW");
   Serial.println("    '.D'            : Movimiento CW");
+  Serial.println("    '.CHUNK'        : Elegir tamaño de Chunks (Bytes)");
   Serial.println("    '.STEP#'        : Elegir cantidad de Steps (1/32: 6400/Vuelta)");
   Serial.println("    '.INTERVAL#'    : Elegir intervalo de CSV");
   Serial.println("    '.FORCE###'     : Cambiar configuración LoRa: SHORT, MID, LONG");
-  Serial.println("    '.CALCULATE'    : Calcula la ruta");
-  Serial.println("    '.AUTO'         : Realiza la ruta de manera autonoma");
-  Serial.println("    '.REVERSE'      : Realiza la ruta hacia de manera inversa");
-  Serial.println("    '.SHOW'         : Muestra la ruta calculada");
-  Serial.println("    '.INSTRUCTIONS' : Muestra las instrucciones para realizar la ruta");
-  Serial.println("    '.CHANGE'       : Cambiar la meta actual '.CHANGEY,X'");
+  Serial.println("    '.GO' / '.START': Inicia envío de telemetría");
+  Serial.println("    '.STOP'         : Detiene envío de telemetría");
+  Serial.println("    '.IMAGE'        : Capturar y recibir Imagen");
+  Serial.println("    '.CANCEL'       : Detener envío de Imagen");
+  Serial.println("    '.AUTO'         : Inicia modo autónomo");
+  Serial.println("    '.STOPAUTO'     : Detiene modo autónomo");
+  Serial.println("    '.GOAL X Y'     : Establece objetivo en coordenadas X,Y");
+  Serial.println("    '.OBJ X Y'      : Marca obstáculo en coordenadas X,Y");
+  Serial.println("    '.PAUSE'        : Pausa modo autónomo");
+  Serial.println("    '.RESUME'       : Reanuda modo autónomo");
+  Serial.println("    '.REVERSE'      : Establece objetivo en (0,0)");
+  Serial.println("    '.CLEAR'        : Limpia mapa manteniendo pose");
+  Serial.println("    '.CLEARALL'     : Limpia mapa y resetea pose");
+  Serial.println("    '.RESET'        : Resetear Rover - EVA");
+  Serial.println("    '.RECAM'        : Resetear CAM");
 }
 
 void cancelImageTransfer() {
   receivingImage = false;
   imgBuffer = "";
-  webImage = "";
   expectedChunks = 0;
   receivedChunks = 0;
   msgQueued = false;
   msgToSend = "";
   Serial.println("IMAGE_TRANSFER_CANCELLED");
   webSocket.broadcastTXT("IMG_DONE");
+  queueMessage("STPIMG");
 }
 
 void watchdogTask(void *parameter) {
   esp_task_wdt_add(NULL);
   Serial.println("WATCHDOG_TASK_ENABLED");
 
-  while (true) {
+ while (true) {
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
