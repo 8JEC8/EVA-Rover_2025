@@ -103,7 +103,7 @@ h2 {
 
   .camera-box img {
     width: 100%;
-    height: 100%;
+    height: 80%;
     object-fit: contain;
     border-radius: 8px;
   }
@@ -402,11 +402,20 @@ h2 {
     width: 100%;
     text-align: center;
     margin: 0;
-    margin-bottom: 6px; /* optional spacing */
+    margin-bottom: 6px;
   }
 
 /* Responsive */
 @media (max-width: 900px), (max-width: 1200px) and (min-width: 901px) {
+
+  .camera-box {
+    height: 280px;
+    width: 300px
+  }
+
+  .camera-box img {
+    height: 80%;
+  }
 
   /* Stack telemetry columns */
   .telemetry-container {
@@ -492,7 +501,7 @@ h2 {
 </style>
 </head>
 <body>
-<h2>~EVA: Dashboard de Telemetría y Control~</h2>
+<h2>EVA: Dashboard de Telemetría y Control</h2>
 
 <div class="controls-line"></div>
 
@@ -592,6 +601,7 @@ h2 {
     <button id="requestImage" class="command-button" style="background-color: #28a745;">Obtener Imagen</button>
     <button id="captureImage" class="command-button" style="background-color: #28a745;">Capturar Imagen</button>
     <button id="cancelImage" class="command-button" style="background-color: #28a745;">Cancelar Imagen</button>
+    <button id="resetCam" class="command-button" style="background-color: red;">Reset: ESPCAM</button>
   </div>
 
 <div class="command-inputs-box">
@@ -618,14 +628,14 @@ h2 {
 
   <div class="command-input-row">
     <label for="speedInput">Tamaño de Chunks (B):</label>
-    <div class="current-value-box" id="currChunks">128</div>
+    <div class="current-value-box" id="currChunks">200</div>
     <input type="number" id="chunkSize" min="1" max="200" step="1" value="">
     <button id="setChunkBtn">Enviar</button>
   </div>
 
   <div class="command-input-row">
     <label for="stepInput">Pasos de Motor (6400/T):</label>
-    <div class="current-value-box" id="currSteps">6400</div>
+    <div class="current-value-box" id="currSteps">3740</div>
     <input type="number" id="stepSize" min="1" max="25600" value="">
     <button id="setStepBtn">Enviar</button>
   </div>
@@ -643,14 +653,14 @@ h2 {
     <button id="party" class="command-button-movement rainbow">¡MODO FIESTA!</button>
   </div>
 
+  <div class="grid-box">
+      <div id="grid"></div>
+  </div>
+
   <div class="controls-box command-button-box">
     <button id="forceShort" class="command-button">-LoRa- <br> Corto Alcance</button>
     <button id="forceMid" class="command-button">-LoRa- <br> Medio Alcance</button>
     <button id="forceLong" class="command-button">-LoRa- <br> Largo Alcance</button>
-  </div>
-
-  <div class="grid-box">
-      <div id="grid"></div>
   </div>
 
 </div>
