@@ -21,7 +21,7 @@ const char main_js[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 const char* apSSID = "EVA_Dashboard";
-const char* apPassword = "Voyager21";  // min 8 chars
+const char* apPassword = "VOYAGER21";  // min 8 chars
 
 WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
@@ -41,15 +41,15 @@ bool receivingImage = false;
 String msgToSend = "";                    // Fila de mensaje de monitor serial
 bool msgQueued = false;
 
-unsigned long retryInterval = 500;        // Default LoRa MID: ms entre intervalos de envío
-unsigned long ackTimeout = 2000;          // Default LoRa MID: 2 segundo de espera en reintento
+unsigned long retryInterval = 100;        // Default LoRa MID: ms entre intervalos de envío
+unsigned long ackTimeout = 500;          // Default LoRa MID: 2 segundo de espera en reintento
 unsigned long chunkTimeout = 1500;        // Default LoRa MID: 2 segundos para reenviar solicitud de chunk
 
 unsigned long msgStartTime = 0;           // Cuando el mensaje fue enviado
 unsigned long lastSendAttempt = 0;
 unsigned long lastChunkRequestTime = 0;
 
-int expectedLength = 128;
+int expectedLength = 200;
 float csvInt = 1.5;
 int nemaStep = 6400;
 String currGoal = "";
@@ -61,8 +61,8 @@ LoRaRange currentRange = SHORT;  // Iniciar SHORT
 // RSSI Threshold
 const int shortToMid = -65;   // SHORT → MID
 const int midToShort  = -45;  // MID → SHORT
-const int midToLong   = -100; // MID → LONG
-const int longToMid   = -90;  // LONG → MID
+const int midToLong   = -95; // MID → LONG
+const int longToMid   = -85;  // LONG → MID
 
 // Promedio RSSI
 const int rssiSampleCount = 4;    // Number of samples in the rolling average
@@ -242,7 +242,7 @@ void loop() {
         webSocket.broadcastTXT("GOAL_" + String(currGoal));
       }
     }
-
+/*
     // Cambio dinámico dependiendo de Thresholds
     switch (currentRange) {
         case SHORT:
@@ -269,7 +269,7 @@ void loop() {
             }
             break;
     }
-
+*/
     // Handle image ready signal
     if (received.startsWith("IMG_SIZE")) {
       expectedChunks = received.substring(received.indexOf(',') + 1).toInt();
@@ -682,10 +682,11 @@ void LoRaShort() {
   LoRa.setCodingRate4(5);
   LoRa.setPreambleLength(6);
   delay(50);
-  retryInterval = 200;
-  ackTimeout = 1000;
-  chunkTimeout = 2000;
+  retryInterval = 100;
+  ackTimeout = 500;
+  chunkTimeout = 1500;
   currentRange = SHORT;
+  webSocket.broadcastTXT("CSVINT_" + String("1.5"));
 }
 
 void LoRaMid() {
@@ -697,10 +698,11 @@ void LoRaMid() {
   LoRa.setCodingRate4(6);
   LoRa.setPreambleLength(8);
   delay(50);
-  retryInterval = 750;
-  ackTimeout = 3000;
-  chunkTimeout = 4500;
+  retryInterval = 300;
+  ackTimeout = 1500;
+  chunkTimeout = 2000;
   currentRange = MID;
+  webSocket.broadcastTXT("CSVINT_" + String("2.5"));
 }
 
 void LoRaLong() {
@@ -716,6 +718,7 @@ void LoRaLong() {
   ackTimeout = 6000;
   chunkTimeout = 5000;
   currentRange = LONG;
+  webSocket.broadcastTXT("CSVINT_" + String("5.0"));
 }
 
 void printCommandList() {
@@ -724,11 +727,14 @@ void printCommandList() {
   Serial.println("    '.S'            : Movimiento Hacia Atrás");
   Serial.println("    '.A'            : Movimiento CCW");
   Serial.println("    '.D'            : Movimiento CW");
+  Serial.println("    '.CHUNK'        : Elegir tamaño de Chunks (Bytes)");
   Serial.println("    '.STEP#'        : Elegir cantidad de Steps (1/32: 6400/Vuelta)");
   Serial.println("    '.INTERVAL#'    : Elegir intervalo de CSV");
   Serial.println("    '.FORCE###'     : Cambiar configuración LoRa: SHORT, MID, LONG");
   Serial.println("    '.GO' / '.START': Inicia envío de telemetría");
   Serial.println("    '.STOP'         : Detiene envío de telemetría");
+  Serial.println("    '.IMAGE'        : Capturar y recibir Imagen");
+  Serial.println("    '.CANCEL'       : Detener envío de Imagen");
   Serial.println("    '.AUTO'         : Inicia modo autónomo");
   Serial.println("    '.STOPAUTO'     : Detiene modo autónomo");
   Serial.println("    '.GOAL X Y'     : Establece objetivo en coordenadas X,Y");
