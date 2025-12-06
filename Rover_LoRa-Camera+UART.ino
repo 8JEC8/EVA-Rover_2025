@@ -37,13 +37,12 @@
   #define LED_FLASH_GPIO    -1
 #endif
 
-// Globals
 std::vector<String> imageChunks;
 int totalChunks = 0;
-int chunkSize = 128;
+int chunkSize = 200;
 
-bool receivingTel = false;   // Already exists
-bool wasReceivingTel = false; // NEW flag to remember previous state
+bool receivingTel = false;
+bool wasReceivingTel = false;       // Recordar estado previo
 TaskHandle_t watchdogTaskHandle = NULL;
 
 void setup() {
@@ -70,7 +69,6 @@ void setup() {
     0                       // core 0 (low priority)
   );
 
-  // LoRa setup
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_SS);
   LoRa.setPins(LORA_SS, -1, LORA_DIO0);
 
@@ -147,6 +145,7 @@ void handleRequest(String cmd) {
     LoRa.setCodingRate4(5);
     LoRa.setPreambleLength(6);
     Serial.println("INT1.5");
+    chunkSize = 200;
   }
 
   else if (cmd == "MRA") {
@@ -155,6 +154,7 @@ void handleRequest(String cmd) {
     LoRa.setCodingRate4(6);
     LoRa.setPreambleLength(8);
     Serial.println("INT2.5");
+    chunkSize = 128;
   }
 
   else if (cmd == "LRA") {
@@ -162,7 +162,8 @@ void handleRequest(String cmd) {
     LoRa.setSignalBandwidth(125E3);
     LoRa.setCodingRate4(8);
     LoRa.setPreambleLength(10);
-    Serial.println("INT8.0");
+    Serial.println("INT5.0");
+    chunkSize = 64;
   }
 
   else if (cmd == "STPIMG") {
@@ -186,6 +187,11 @@ void handleRequest(String cmd) {
     return;
   }
 
+  else if (cmd == "RECAM") {
+    delay(200);
+    ESP.restart();
+  }
+
   else if (cmd.startsWith("REQ_")) {
       int reqNum = cmd.substring(4).toInt();
       if (reqNum >= 1 && reqNum <= totalChunks) {
@@ -201,12 +207,7 @@ void handleRequest(String cmd) {
           LoRa.print(packet);
           LoRa.endPacket();
 
-          // --- Dynamic delay based on chunkSize ---
-          int sendDelay = 100;  // default for large chunks
-          if (chunkSize <= 64) sendDelay = 300;      // smallest chunks → slowest send
-          else if (chunkSize <= 128) sendDelay = 200;
-          else if (chunkSize <= 200) sendDelay = 100;
-          delay(sendDelay);
+          delay(50);
 
           // Resume TEL after sending last chunk
           if (reqNum == totalChunks && wasReceivingTel) {
@@ -215,7 +216,7 @@ void handleRequest(String cmd) {
           }
 
       } else {
-          // Invalid chunk number
+          // # Inválido de Chunk
       }
       return;
   }
@@ -261,9 +262,8 @@ void initCamera() {
   }
 }
 
-// --- Capture and store image ---
 void captureAndStoreImage() {
-  // clear previous image
+  // Clear imagen previa
   imageChunks.clear();
   totalChunks = 0;
 
@@ -277,7 +277,7 @@ void captureAndStoreImage() {
     return;
   }
 
-  // Encode to Base64
+  // B64
   String encoded = base64::encode(fb->buf, fb->len);
   esp_camera_fb_return(fb);
 
@@ -290,7 +290,7 @@ void captureAndStoreImage() {
     imageChunks.push_back(encoded.substring(start, end));
   }
 
-  // Inform receiver
+  // Informar de tamaño a estación para iniciar recepción
   LoRa.beginPacket();
   LoRa.print("IMG_SIZE," + String(totalChunks));
   LoRa.endPacket();
